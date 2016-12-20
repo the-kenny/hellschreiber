@@ -69,28 +69,31 @@ macro_rules! index_member {
 }
 
 #[derive(Debug)]
+#[doc(hidden)]
 pub struct EAVT(Datom);
 index_member!(EAVT, (entity, attribute, value, tx, added));
 
 #[derive(Debug)]
+#[doc(hidden)]
 pub struct AEVT(Datom);
 index_member!(AEVT, (attribute, entity, value, tx, added));
 
 #[derive(Debug)]
+#[doc(hidden)]
 pub struct Log(Datom);
 index_member!(Log, (tx, entity, attribute, value, added));
 
 pub struct Index<T: Indexable> {
   datoms: BTreeSet<T>,
-  // We need to track upper and lower datom bounds for correct
-  // BTreeSet::range access
-  bounds: (Datom, Datom),
+  // We need to track upper datom bound for correct BTreeSet::range
+  // access
+  upper_bound: Datom,
 }
 
 impl<T: Indexable> Default for Index<T> {
   fn default() -> Self {
     Index {
-      bounds: Default::default(),
+      upper_bound: Datom::default(),
       datoms: Default::default(),
     }
   }
@@ -102,16 +105,10 @@ impl<T: Indexable> Index<T> {
   }
 
   fn update_bounds(&mut self, datom: &Datom) {
-    let ref mut lower = self.bounds.0;
-    let ref mut upper = self.bounds.1;
-    
     macro_rules! check {
       ($name:ident) => {
-        if lower.$name > datom.$name {
-          lower.$name = datom.$name.clone();
-        }
-        if upper.$name < datom.$name {
-          upper.$name = datom.$name.clone();
+        if self.upper_bound.$name < datom.$name {
+          self.upper_bound.$name = datom.$name.clone();
         }
       }
     }
@@ -135,8 +132,9 @@ pub type LogIndex  = Index<Log>;
 
 impl EavtIndex {
   pub fn entity<'a>(&'a self, e: EntityId) -> impl Iterator<Item=&'a Datom> {
-    // TODO: Simply track lowest and highest datom as struct members
-    let (mut start, mut end) = self.bounds.clone();
+    // TODO: Simnply track lowest and highest datom as struct members
+    let mut start = Datom::default();
+    let mut end = self.upper_bound.clone();
 
     start.entity = e;
     end.entity = e;
