@@ -1,0 +1,7 @@
+[package]
+name = "ratomic"
+version = "0.1.0"
+authors = ["Moritz Ulrich <moritz@tarn-vedra.de>"]
+
+[dev-dependencies]
+rand = "0.3"
