@@ -1,5 +1,4 @@
-use super::{Datom, EntityId};
-
+use super::*;
 use std::collections::*;
 
 use std::cmp;
@@ -108,15 +107,14 @@ impl<T: Indexable> Index<T> {
     self.datoms.insert(datom.clone().into());
   }
 
-  fn datom_bounds(&self) -> (Datom, Datom) {
+  pub fn datom_bounds(&self) -> (Datom, Datom) {
     (Datom::default(), self.upper_bound.clone())
   }
   
-  fn datom_range<'a>(&'a self, start: Datom, end: Datom) -> impl Iterator<Item=&'a Datom> {
+  pub fn datom_range<'a>(&'a self, start: &Datom, end: &Datom) -> impl DoubleEndedIterator<Item=&'a Datom> {
     use std::collections::Bound::Included;
-    self.datoms.range(Included(&start.into()), Included(&end.into()))
+    self.datoms.range(Included(&start.clone().into()), Included(&end.clone().into()))
       .map(|d| d.as_ref())
-      .filter(|d| d.added == true)
   }
 }
 
@@ -125,16 +123,18 @@ pub type AevtIndex = Index<AEVT>;
 pub type LogIndex  = Index<Log>;
 
 impl EavtIndex {
-  pub fn entity<'a>(&'a self, e: EntityId) -> impl Iterator<Item=&'a Datom> {
-    let (mut start, mut end) = self.datom_bounds();
+  // pub fn entity<'a>(&'a self, e: EntityId) -> impl Iterator<Item=&'a Datom> {
+  //   let (mut start, mut end) = self.datom_bounds();
 
-    start.entity = e;
-    end.entity = e;
+  //   start.entity = e;
+  //   end.entity = e;
 
-    self.datom_range(start, end)
-  }
+  //   self.datom_range(start, end)
+  // }
 
 }
+
+// TODO: We might want to implement `Index<Range<Datom>>` on `Index<T>`.
 
 // TODO: AVET, VAET
 
@@ -211,40 +211,6 @@ mod tests {
     let mut eids2 = eids.clone(); eids2.sort();
     assert_eq!(eids, eids2);
   }
-  
-  #[test]
-  fn test_eavt_entity_api() {
-    let mut eavt = EavtIndex::default();
-    for d in make_datoms() { eavt.insert(&d); }
-
-    assert_eq!(eavt.all_datoms().map(|d| d.entity).collect::<Vec<_>>(),
-               vec![1, 1, 2, 3]);
-
-    assert_eq!(eavt.entity(1).map(|d| &d.value[..]).collect::<Vec<_>>(),
-               vec!["42", "Heinz"]);
-    
-    assert_eq!(eavt.entity(2).map(|d| &d.value[..]).collect::<Vec<_>>(),
-               vec!["Karl"]);
-    
-    assert!(eavt.entity(999).collect::<Vec<_>>().is_empty());
-  }
-
-  #[test]
-  #[ignore]
-  fn test_eavt_entity_api_added_false() {
-    let mut eavt = EavtIndex::default();
-    for d in make_datoms() { eavt.insert(&d); }
-
-    // Get the age datom, then re-insert it with `added: false`
-    let mut age = eavt.entity(1).next().unwrap().clone();
-    assert_eq!(age.attribute, "person/age");
-    age.added = false;
-    eavt.insert(&age);
-    println!("{:?}", eavt.entity(1).collect::<Vec<_>>());
-    assert_eq!(eavt.entity(1).map(|d| &d.value[..]).collect::<Vec<_>>(),
-               vec!["Heinz"]);
-
-  }
 
   #[test]
   fn test_aevt() {
@@ -263,5 +229,4 @@ mod tests {
     assert_eq!(eavt.all_datoms().map(|d| d.tx).collect::<Vec<_>>(),
                vec![1,2,2,3]);
   }
-
 }
