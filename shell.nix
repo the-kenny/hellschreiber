@@ -1,17 +1,23 @@
-{ pkgs ? import <nixpkgs> {} }:
-
+{ nixpkgs ? <nixpkgs> }:
 let
-  stdenv = pkgs.stdenv;
-  rustNightly = import ../nightly.nix {};
-in
-stdenv.mkDerivation {
-  name = "rust-env";
-  buildInputs = with pkgs; [
-    (rustNightly.rust-platform {})
-    # rustNightly.cargo
-    sqlite
-  ];
+  pkgs = import nixpkgs {};
+in rec {
+  rustEnv = pkgs.stdenv.mkDerivation {
+    name = "rust";
+    version = "1.2.3.4";
+    src = null;
+    buildInputs = with pkgs; [
+      rustChannels.stable.rust
+      rustChannels.stable.cargo
+      sqlite
+      pkgconfig
+    ];
 
-  RUST_BACKTRACE=1;
-  RUST_SRC_PATH="${pkgs.rustc.src}";
+    RUST_BACKTRACE=1;
+    RUST_SRC_PATH="${pkgs.rustc.src}";
+
+    shellHook = ''
+      export PATH="target/debug/:$PATH";
+    '';
+  };
 }
