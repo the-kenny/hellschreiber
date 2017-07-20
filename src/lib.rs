@@ -37,13 +37,16 @@ type Fact   = (TempId, Attribute, Value, Status);
 
 use std::collections::BTreeMap;
 
-type Entity<'a> = BTreeMap<Attribute, &'a Value>;
+pub struct Entity<'a, D: Db + 'a> {
+  db: &'a D,
+  values: BTreeMap<Attribute, &'a Value>,
+}
 
-pub trait Db {
+pub trait Db: Sized {
   fn transact<T: Into<Fact>>(&mut self, tx: &[T]) -> TxId;
   fn all_datoms<'a>(&'a self) -> &'a [Datom]; // TODO: impl Iter?
     
-  fn entity<'a>(&'a self, entity: EntityId) -> Entity<'a> {
+  fn entity<'a>(&'a self, entity: EntityId) -> Entity<'a, Self> {
     let mut attrs: BTreeMap<Attribute, (TxId, &'a Datom)> = Default::default();
     let datoms = self.all_datoms().iter().filter(|d| d.entity == entity);
     for d in datoms {
@@ -73,9 +76,14 @@ pub trait Db {
       }
     }
     
-    attrs.values().into_iter()
+    let values = attrs.values().into_iter()
       .map(|&(_, d)| (d.attribute, &d.value))
-      .collect()
+      .collect();
+
+    Entity {
+      db: self,
+      values: values,
+    }
   }
 
   fn store_datoms(&mut self, _datoms: &[Datom]) {
@@ -116,18 +124,18 @@ mod test {
   fn test_entity<D: Db>(mut db: D) {
     db.store_datoms(&test_data::make_test_data());
 
-    assert_eq!(db.entity(EntityId(99999)).len(), 0);
+    assert_eq!(db.entity(EntityId(99999)).values.len(), 0);
     
-    let heinz = db.entity(EntityId(1));
+    let heinz = db.entity(EntityId(1)).values;
     assert_eq!(heinz.len(), 2);
     assert_eq!(heinz.get(&test_data::person_name), Some(&&Value::Str("Heinz".into())));
     assert_eq!(heinz.get(&test_data::person_age), Some(&&Value::Int(42)));
     assert_eq!(heinz.get(&test_data::album_name), None);
 
-    let karl  = db.entity(EntityId(2));
+    let karl  = db.entity(EntityId(2)).values;
     assert_eq!(karl.len(), 1);
 
-    let nevermind = db.entity(EntityId(3));
+    let nevermind = db.entity(EntityId(3)).values;
     assert_eq!(nevermind.len(), 1);
     assert_eq!(nevermind.get(&test_data::album_name), Some(&&Value::Str("Nevermind".into())));
   }
