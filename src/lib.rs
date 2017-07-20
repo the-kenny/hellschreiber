@@ -43,18 +43,18 @@ pub struct Entity<'a, D: Db + 'a> {
   values: BTreeMap<Attribute, Value>,
 }
 
-pub type Datoms<'a> = Vec<Datom>;
+use std::borrow::Cow;
+pub type Datoms<'a> = Cow<'a, [Datom]>;
 
 pub trait Db: Sized {
   fn transact<T: Into<Fact>>(&mut self, tx: &[T]) -> TxId;
   fn all_datoms<'a>(&'a self) -> Datoms; // TODO: impl Iter?
     
   fn entity<'a>(&'a self, entity: EntityId) -> Entity<'a, Self> {
-    let datoms = self.all_datoms().into_iter().filter(|d| d.entity == entity)
-      .collect::<Vec<Datom>>();
+    let datoms = self.all_datoms();
     let mut attrs: BTreeMap<Attribute, (TxId, &Datom)> = Default::default();
     
-    for d in &datoms {
+    for d in datoms.into_iter().filter(|d| d.entity == entity) {
       use std::collections::btree_map::Entry;
       
       let entry = (d.tx, d);
@@ -81,10 +81,9 @@ pub trait Db: Sized {
       }
     }
 
-    let mut values = BTreeMap::new();
-    for &(_, d) in attrs.values() {
-      values.insert(d.attribute, d.value.clone());
-    }
+    let values = attrs.values()
+      .map(|&(_,d)| (d.attribute, d.value.clone()))
+      .collect();
 
     Entity {
       db: self,
@@ -134,11 +133,11 @@ impl Db for SqliteDb {
       }
     }).unwrap();
       
-    let mut datoms = Datoms::new();
+    let mut datoms = Vec::new();
     for d in iter {
       datoms.push(d.unwrap());
     }
-    datoms
+    datoms.into()
   }
 
   fn store_datoms(&mut self, datoms: &[Datom]) {
@@ -181,7 +180,7 @@ mod test {
     }
     
     fn all_datoms<'a>(&'a self) -> Datoms {
-      self.0.clone()
+      Cow::Borrowed(&self.0)
     }
   }
 
