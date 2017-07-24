@@ -1,4 +1,4 @@
-use super::*;
+use ::*;
 
 // Mappings
 // 1 -> person/name
