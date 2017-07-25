@@ -1,5 +1,49 @@
 use ::*;
 
+pub fn validate_datoms(datoms: &[Datom]) {
+  use std::collections::{BTreeMap,BTreeSet};
+  let mut values: BTreeMap<(EntityId, Attribute), BTreeSet<&Value>> = BTreeMap::new();
+  for d in datoms {
+    let mut entry = values.entry((d.entity, d.attribute))
+      .or_insert_with(|| BTreeSet::new());
+
+    match d.status {
+      Status::Added => {
+        entry.insert(&d.value);
+      },
+      Status::Retracted => {
+        if !entry.contains(&d.value) {
+          panic!("Found Retraction on non-existing value: {:?}", d);
+        } else {
+          entry.remove(&d.value);
+        }
+      }
+    }
+  }
+
+  // TODO: Add more tests
+}
+
+#[test]
+fn test_datom_test_set() {
+  let datoms = tests::data::make_test_data();
+  validate_datoms(&datoms);
+}
+
+#[test]
+#[should_panic]
+fn test_invalid_datom_set() {
+  let mut datoms = tests::data::make_test_data();
+
+  // Clone last added datom, make it a retraction, change its value
+  let mut retraction = datoms.iter().filter(|d| d.status == Status::Added).last().unwrap().clone();
+  retraction.status = Status::Retracted;
+  retraction.value = Value::Str("xxxxxxxxxx".into());
+  datoms.push(retraction);
+
+  validate_datoms(&datoms);
+}
+
 #[test]
 pub fn test_components() {
   let d = Datom {
@@ -44,6 +88,12 @@ impl Db for TestDb {
     self.0.clear();
     self.0.extend_from_slice(datoms);
   }
+
+  #[cfg(test)]
+  fn all_datoms<'a>(&'a self) -> Datoms<'a> {
+    Cow::Borrowed(&self.0)
+  }
+
 
   fn datoms<'a, C: Borrow<Components>>(&'a self, index: Index, components: C) -> Datoms {
     let mut datoms = self.0.clone();
@@ -125,6 +175,7 @@ impl Db for TestDb {
 
 pub fn test_entity<D: Db>(mut db: D) {
   db.store_datoms(&tests::data::make_test_data());
+  validate_datoms(&db.all_datoms());
 
   assert_eq!(db.entity(EntityId(99999)).values.len(), 0);
 
@@ -148,7 +199,7 @@ pub fn test_datoms<D: Db>(mut db: D) {
   let pn = tests::data::person_name;
   let pa = tests::data::person_age;
   let an = tests::data::album_name;
-
+  
   let heinz     = EntityId(1);
   let karl      = EntityId(2);
   let nevermind = EntityId(3);
@@ -191,4 +242,22 @@ pub fn test_datoms<D: Db>(mut db: D) {
   assert_eq!(eavt.iter().map(|d| d.attribute).collect::<Vec<_>>(),
              vec![]);
 
+}
+
+pub fn test_db_equality<D: Db, E: Db>(mut db1: D, mut db2: E) {
+  db1.store_datoms(&tests::data::make_test_data());
+  db2.store_datoms(&tests::data::make_test_data());
+
+  assert_eq!(db1.all_datoms(), db2.all_datoms());
+
+  use ::tests::data::person_name;
+  for &idx in [Index::Eavt].into_iter() {
+    for c in [Components(None,                None,              None, None),
+              Components(Some(EntityId(1)),   None,              None, None),
+              Components(Some(EntityId(999)), None,              None, None),
+              Components(None,                Some(person_name), None, None)].into_iter() {
+      assert_eq!(db1.datoms(idx, c),
+                 db2.datoms(idx, c));
+    }
+  }
 }

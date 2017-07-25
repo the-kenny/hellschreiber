@@ -25,8 +25,6 @@ pub fn make_test_data() -> Vec<Datom> {
     // New entity
     (2, person_name, Value::Str("Karl".into()),      4, Status::Added),
     (3, album_name,  Value::Str("Nevermind".into()), 5, Status::Added),
-    // Retract with wrong value
-    (3, album_name,  Value::Str("xxx".into()),       6, Status::Retracted),
   ].into_iter()
     .map(|&(e, a, ref v, t, status)| {
       Datom {
@@ -37,4 +35,21 @@ pub fn make_test_data() -> Vec<Datom> {
         status: status,
       }
     }).collect()
+}
+
+pub fn make_txs() -> Vec<Vec<Fact>> {
+  let make_tx = |xs: &Vec<(i64, Attribute, Value, Status)>| {
+    xs.into_iter().map(|&(e, a, ref v, status)| {
+      (EntityId(e), a, v.clone(), status)
+    }).collect::<Vec<Fact>>()
+  };
+
+  [vec![(1, person_name, Value::Str("Heinz".into()),     Status::Added),
+        (1, person_age,  Value::Int(23),                 Status::Added)],
+   vec![(1, person_age,  Value::Int(42),                 Status::Added),
+        (1, album_name,  Value::Str("Nevermind".into()), Status::Added)],
+   vec![(1, album_name,  Value::Str("Nevermind".into()), Status::Retracted)],
+   vec![(2, person_name, Value::Str("Karl".into()),      Status::Added)],
+   vec![(3, album_name,  Value::Str("Nevermind".into()), Status::Added)],
+  ].into_iter().map(make_tx).collect()
 }

@@ -31,11 +31,7 @@ impl SqliteDb {
     let values = value_query.query_map(&[&entity.0, &(attribute.0).0], |row| {
       let v: Value = row.get(0);
       let t: TxId = TxId(row.get(1));
-      let status = match row.get(2) {
-        0 => Status::Added,
-        1 => Status::Retracted,
-        _ => unreachable!()
-      };
+      let status = row.get(2);
 
       (v,t,status)
     }).unwrap().flat_map(|x| x);
@@ -67,6 +63,27 @@ impl SqliteDb {
 }
 
 impl Db for SqliteDb {
+  #[cfg(test)]
+  fn all_datoms<'a>(&'a self) -> Datoms<'a> {
+    let mut q = self.conn.prepare(
+      "select * from datoms order by t asc"
+    ).unwrap();
+
+    let datoms = q.query_map(&[], |row| {
+      Datom {
+        entity: EntityId(row.get(0)),
+        attribute: Attribute(EntityId(row.get(1))),
+        value: row.get(2),
+        tx: TxId(row.get(3)),
+        status: row.get(4),
+      }
+    }).unwrap()
+      .flat_map(|x| x)
+      .collect::<Vec<Datom>>();
+
+    Cow::Owned(datoms)
+  }
+
   fn transact<T: Into<Fact>>(&mut self, _tx: &[T]) -> TxId {
     unimplemented!()
   }
@@ -128,24 +145,40 @@ impl Db for SqliteDb {
     let mut stmt = self.conn.prepare("insert into datoms (e,a,v,t,retracted) values (?1, ?2, ?3, ?4, ?5)")
       .unwrap();
     for d in datoms {
-      let retracted = match d.status {
-        Status::Added => 0,
-        Status::Retracted => 1,
-      };
       stmt.execute(&[&(d.entity.0),
                      &(d.attribute.0).0,
                      &d.value,
                      &d.tx.0,
-                     &retracted])
+                     &d.status])
         .unwrap();
     }
   }
 }
 
-impl rusqlite::types::FromSql for Value {
-  fn column_result(value: rusqlite::types::ValueRef) -> rusqlite::types::FromSqlResult<Self> {
-    use rusqlite::types::ValueRef;
+use rusqlite::types::{ValueRef, ToSqlOutput, FromSqlResult};
 
+impl rusqlite::types::FromSql for Status {
+  fn column_result(value: rusqlite::types::ValueRef) -> FromSqlResult<Self> {
+    value.as_i64().map(|i| match i {
+      1 => Status::Retracted,
+      0 => Status::Added,
+      _ => unimplemented!()
+    })
+  }
+}
+
+impl rusqlite::types::ToSql for Status {
+  fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
+    match *self {
+      Status::Added     => Ok(0.into()),
+      Status::Retracted => Ok(1.into())
+    }
+  }
+}
+
+
+impl rusqlite::types::FromSql for Value {
+  fn column_result(value: ValueRef) -> FromSqlResult<Self> {
     match value {
       ValueRef::Text(t)    => Ok(Value::Str(t.into())),
       ValueRef::Integer(i) => Ok(Value::Int(i)),
@@ -155,11 +188,10 @@ impl rusqlite::types::FromSql for Value {
 }
 
 impl rusqlite::types::ToSql for Value {
-  fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput> {
-    use rusqlite::types::{ValueRef, ToSqlOutput};
+  fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
     match self {
       &Value::Str(ref s) => Ok(ToSqlOutput::Borrowed(ValueRef::Text(s))),
-      &Value::Int(i) => Ok(ToSqlOutput::Owned(rusqlite::types::Value::Integer(i)))
+      &Value::Int(i)     => Ok(ToSqlOutput::Owned(rusqlite::types::Value::Integer(i)))
     }
   }
 }

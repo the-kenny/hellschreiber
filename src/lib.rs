@@ -81,8 +81,11 @@ impl Components {
 }
 
 pub trait Db: Sized {
+  #[cfg(test)]
+  fn all_datoms<'a>(&'a self) -> Datoms<'a>;
+
   fn transact<T: Into<Fact>>(&mut self, tx: &[T]) -> TxId;
-  fn datoms<'a, C: Borrow<Components>>(&'a self, index: Index, components: C) -> Datoms;
+  fn datoms<'a, C: Borrow<Components>>(&'a self, index: Index, components: C) -> Datoms<'a>;
 
   fn entity<'a>(&'a self, entity: EntityId) -> Entity<'a, Self> {
     let datoms = self.datoms(Index::Eavt, Components::empty());
@@ -147,6 +150,19 @@ mod tests {
         #[test]
         fn test_datoms() {
           super::db::test_datoms(($t));
+        }
+
+        #[test]
+        #[allow(unused_parens)]
+        fn test_db_other_equality() {
+          let db1 = ::tests::db::TestDb::new();
+          let db2 = ($t);
+          super::db::test_db_equality(db1, db2);
+        }
+
+        #[test]
+        fn test_db_self_equality() {
+          super::db::test_db_equality(($t), ($t));
         }
       }
     }
