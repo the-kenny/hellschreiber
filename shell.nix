@@ -13,7 +13,7 @@ in rec {
       pkgconfig
     ];
 
-    RUST_BACKTRACE=1;
+    RUST_BACKTRACE="1";
     RUST_SRC_PATH="${pkgs.rustc.src}";
 
     shellHook = ''

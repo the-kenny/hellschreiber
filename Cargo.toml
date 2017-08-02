@@ -5,6 +5,7 @@ authors = ["Moritz Ulrich <moritz@tarn-vedra.de>"]
 
 [dependencies]
 rusqlite = "0.12.0"
+log = "*"
 
 [dev-dependencies]
 rand = "0.3"
