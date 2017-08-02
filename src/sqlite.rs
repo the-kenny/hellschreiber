@@ -17,69 +17,84 @@ impl SqliteDb {
     SqliteDb { conn: conn }
   }
 
-  fn attribute_value(&self,
-                     entity: EntityId,
-                     attribute: Attribute)
-                     -> Option<(Value,TxId)> {
+  #[cfg(test)]
+  fn make_datom(row: &rusqlite::Row) -> Datom {
+    Datom {
+      entity: EntityId(row.get(0)),
+      attribute: Attribute(EntityId(row.get(1))),
+      value: row.get(2),
+      tx: TxId(row.get(3)),
+      status: row.get(4),
+    }
+  }
+
+  fn attribute_values(&self,
+                      entity: EntityId,
+                      attribute: Attribute)
+                      -> Vec<(Attribute, Value, TxId)> {
     let mut value_query = self.conn.prepare(
-      "select v,t,retracted from datoms where e = ?1 and a = ?2 order by t desc"
+      "select v, t
+       from datoms
+       where e = ?1 and a = ?2 and retracted_tx is null
+       order by t asc"
     ).unwrap();
 
-    // Query all datoms for attribute a, ordered by descending
-    // tx. If the first datom has Status::Added we just return
-    // this, else we search for the first non-retracted value
-    let values = value_query.query_map(&[&entity.0, &(attribute.0).0], |row| {
+    let rows = value_query.query_map(&[&entity.0, &(attribute.0).0], |row| {
       let v: Value = row.get(0);
       let t: TxId = TxId(row.get(1));
-      let status = row.get(2);
 
-      (v,t,status)
-    }).unwrap().flat_map(|x| x);
+      (attribute, v, t)
+    }).unwrap().map(|x| x.unwrap());
 
-    // Collect all retractions until we find an assertion.
-    // If that assertion matches a retraction, we return
-    // None, else we return the value
-
-    use std::collections::BTreeSet;
-    values.fold((None, BTreeSet::new()), |(ret, mut retractions), row| {
-      if ret.is_some() {
-        (ret, retractions)
-      } else {
-        match row {
-          (v, _, Status::Retracted) => {
-            retractions.insert(v);
-            (None, retractions)
-          }
-          (ref v, _, Status::Added) if retractions.contains(&v) => {
-            (Some(None), retractions)
-          },
-          (v, tx, Status::Added) => {
-            (Some(Some((v, tx))), retractions)
-          }
-        }
-      }
-    }).0.unwrap_or(None)
+    rows.collect()
   }
 }
+
 
 impl Db for SqliteDb {
   #[cfg(test)]
   fn all_datoms<'a>(&'a self) -> Datoms<'a> {
-    let mut q = self.conn.prepare(
-      "select * from datoms order by t asc"
+    let mut added_query = self.conn.prepare(
+      "select * from datoms
+       where retracted_tx is null
+       order by t asc"
     ).unwrap();
 
-    let datoms = q.query_map(&[], |row| {
-      Datom {
-        entity: EntityId(row.get(0)),
-        attribute: Attribute(EntityId(row.get(1))),
-        value: row.get(2),
-        tx: TxId(row.get(3)),
-        status: row.get(4),
-      }
-    }).unwrap()
+    let mut retracted_query = self.conn.prepare(
+      "select * from datoms
+       where retracted_tx is not null
+       order by t asc"
+    ).unwrap();
+
+    let added = added_query
+      .query_map(&[], SqliteDb::make_datom).unwrap()
       .flat_map(|x| x)
       .collect::<Vec<Datom>>();
+
+    let retracted = retracted_query
+      .query_map(&[], SqliteDb::make_datom).unwrap()
+      .flat_map(|x| x)
+      .collect::<Vec<Datom>>();
+
+    let mut datoms = added;
+
+    // For each retracted datom create two new datoms in our final
+    // data set. One assertion and one retraction.
+    for d in retracted {
+      assert!(d.status.is_retraction());
+
+      let mut added = d.clone();
+      added.status = Status::Added;
+
+      let mut retracted = d.clone();
+      retracted.tx = retracted.status.retraction_tx().unwrap();
+
+      datoms.push(added);
+      datoms.push(retracted);
+    }
+
+    // TODO: Move to helper
+    datoms.sort_by_key(|d| (d.tx, d.attribute, d.status));
 
     Cow::Owned(datoms)
   }
@@ -90,6 +105,8 @@ impl Db for SqliteDb {
 
   fn datoms<'a, C: Borrow<Components>>(&'a self, index: Index, components: C) -> Datoms {
     assert!(index == Index::Eavt);
+
+    // TODO: Add validity tests
 
     let components = components.borrow();
     match *components {
@@ -115,6 +132,7 @@ impl Db for SqliteDb {
       Some(EntityId(i)) => rusqlite::types::Value::Integer(i),
       None              => rusqlite::types::Value::Null,
     };
+
     let entities = entity_query.query_map(&[&entity_query_input], |row| {
       let e: EntityId = EntityId(row.get(0));
 
@@ -122,10 +140,11 @@ impl Db for SqliteDb {
         Some(Attribute(EntityId(i))) => rusqlite::types::Value::Integer(i),
         None                         => rusqlite::types::Value::Null,
       };
+
       let datoms = attribute_query.query_map(&[&e.0, &attribute_query_input], |attr_row| {
         Attribute(EntityId(attr_row.get(0)))
       }).unwrap().map(|x| x.unwrap())
-        .filter_map(|a| self.attribute_value(e, a).map(|(v, tx)| (a, v, tx)))
+        .flat_map(|a| self.attribute_values(e, a))
         .map(|(a, v, tx)| Datom {
           entity: e,
           attribute: a,
@@ -142,16 +161,43 @@ impl Db for SqliteDb {
   }
 
   fn store_datoms(&mut self, datoms: &[Datom]) {
-    let mut stmt = self.conn.prepare("insert into datoms (e,a,v,t,retracted) values (?1, ?2, ?3, ?4, ?5)")
-      .unwrap();
-    for d in datoms {
-      stmt.execute(&[&(d.entity.0),
-                     &(d.attribute.0).0,
-                     &d.value,
-                     &d.tx.0,
-                     &d.status])
-        .unwrap();
+    let tx = self.conn.transaction().unwrap();
+
+    {
+      let mut insert = tx.prepare(
+        "insert into datoms (e,a,v,t,retracted_tx) values (?1, ?2, ?3, ?4, ?5)"
+      ).unwrap();
+
+      let mut retract = tx.prepare(
+        "update datoms set retracted_tx = ?1
+         where e = ?2 and a = ?3 and v = ?4"
+      ).unwrap();
+
+      let added     = datoms.iter().filter(|d| d.status.is_assertion());
+      let retracted = datoms.iter().filter(|d| d.status.is_retraction());
+
+      for d in added {
+        assert!(d.status == Status::Added);
+        insert.execute(&[&(d.entity.0),
+                         &(d.attribute.0).0,
+                         &d.value,
+                         &d.tx.0,
+                         &d.status])
+          .unwrap();
+      }
+
+      for d in retracted {
+        assert!(d.status.is_retraction());
+        let retracted_tx = d.status.retraction_tx().unwrap();
+        retract.execute(&[&retracted_tx.0,
+                          &(d.entity.0),
+                          &(d.attribute.0).0,
+                          &d.value])
+          .unwrap();
+      }
     }
+
+    tx.commit().unwrap()
   }
 }
 
@@ -159,19 +205,19 @@ use rusqlite::types::{ValueRef, ToSqlOutput, FromSqlResult};
 
 impl rusqlite::types::FromSql for Status {
   fn column_result(value: rusqlite::types::ValueRef) -> FromSqlResult<Self> {
-    value.as_i64().map(|i| match i {
-      1 => Status::Retracted,
-      0 => Status::Added,
-      _ => unimplemented!()
-    })
+    match value {
+      ValueRef::Null       => Ok(Status::Added),
+      ValueRef::Integer(tx) => Ok(Status::Retracted(TxId(tx))),
+      _                    => unimplemented!()
+    }
   }
 }
 
 impl rusqlite::types::ToSql for Status {
   fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
     match *self {
-      Status::Added     => Ok(0.into()),
-      Status::Retracted => Ok(1.into())
+      Status::Added     => Ok(rusqlite::types::Null.into()),
+      Status::Retracted(tx) => Ok(tx.0.into()),
     }
   }
 }

@@ -1,7 +1,109 @@
 use ::*;
 
+#[derive(Debug)]
+pub struct TestDb(Vec<Datom>);
+
+impl TestDb {
+  pub fn new() -> Self {
+    TestDb(vec![])
+  }
+}
+
+impl Db for TestDb {
+  fn transact<T: Into<Fact>>(&mut self, _tx: &[T]) -> TxId {
+    unimplemented!()
+  }
+
+  fn store_datoms(&mut self, datoms: &[Datom]) {
+    self.0.clear();
+    self.0.extend_from_slice(datoms);
+  }
+
+  #[cfg(test)]
+  fn all_datoms<'a>(&'a self) -> Datoms<'a> {
+    let mut datoms = self.0.clone();
+    datoms.sort_by_key(|d| (d.tx, d.attribute, d.status));
+    Cow::Owned(datoms)
+  }
+
+  fn datoms<'a, C: Borrow<Components>>(&'a self, index: Index, components: C) -> Datoms {
+    let mut raw_datoms = self.0.clone();
+    raw_datoms.retain(|d| components.borrow().matches(&d));
+    raw_datoms.sort_by_key(|d| d.tx);
+
+    #[derive(Debug)]
+    struct EavEquality(Datom);
+
+    impl PartialEq for EavEquality {
+      fn eq(&self, rhs: &EavEquality) -> bool {
+        let EavEquality(ref lhs) = *self;
+        let EavEquality(ref rhs) = *rhs;
+        lhs.entity == rhs.entity
+          && lhs.attribute == rhs.attribute
+          && lhs.value == rhs.value
+      }
+    }
+    impl Eq for EavEquality {}
+
+    use std::cmp;
+    impl Ord for EavEquality {
+      fn cmp(&self, o: &EavEquality) -> cmp::Ordering {
+        self.0.entity.cmp(&o.0.entity)
+          .then(self.0.attribute.cmp(&o.0.attribute))
+          .then(self.0.value.cmp(&o.0.value))
+      }
+    }
+    impl PartialOrd for EavEquality {
+      fn partial_cmp(&self, o: &EavEquality) -> Option<cmp::Ordering> {
+        Some(self.cmp(&o))
+      }
+    }
+
+    use std::collections::BTreeSet;
+    let mut datoms: BTreeSet<EavEquality> = Default::default();
+
+    for d in raw_datoms.into_iter() {
+      let d = EavEquality(d);
+      match d.0.status {
+        Status::Added => {
+          datoms.insert(d);
+        },
+        Status::Retracted(_) if datoms.contains(&d) => {
+          datoms.remove(&d);
+        },
+        Status::Retracted(_) => {
+          unreachable!("Tried to retract non-existing datum: {:?} (have: {:?})", d.0, datoms)
+        }
+      }
+    }
+
+    let mut datoms = datoms.into_iter()
+      .map(|EavEquality(d)| d)
+      .collect::<Vec<Datom>>();
+
+    datoms.sort_by(|l,r| {
+      use std::cmp::Ordering;
+      macro_rules! cmp {
+        ($i:ident) => (l.$i.cmp(&r.$i));
+        ($($i:ident),*) => {
+          [$(cmp!($i)),*].into_iter().fold(Ordering::Equal, |o, x| o.then(*x))
+
+        };
+      }
+
+      match index {
+        Index::Eavt => cmp!(entity, tx, attribute, value),
+      }
+    });
+
+    Cow::Owned(datoms)
+  }
+}
+
+
 pub fn validate_datoms(datoms: &[Datom]) {
   use std::collections::{BTreeMap,BTreeSet};
+  // TODO: This logic is duplicated in `Db::entity`
   let mut values: BTreeMap<(EntityId, Attribute), BTreeSet<&Value>> = BTreeMap::new();
   for d in datoms {
     let mut entry = values.entry((d.entity, d.attribute))
@@ -11,7 +113,7 @@ pub fn validate_datoms(datoms: &[Datom]) {
       Status::Added => {
         entry.insert(&d.value);
       },
-      Status::Retracted => {
+      Status::Retracted(_) => {
         if !entry.contains(&d.value) {
           panic!("Found Retraction on non-existing value: {:?}", d);
         } else {
@@ -37,7 +139,7 @@ fn test_invalid_datom_set() {
 
   // Clone last added datom, make it a retraction, change its value
   let mut retraction = datoms.iter().filter(|d| d.status == Status::Added).last().unwrap().clone();
-  retraction.status = Status::Retracted;
+  retraction.status = Status::Retracted(retraction.tx);
   retraction.value = Value::Str("xxxxxxxxxx".into());
   datoms.push(retraction);
 
@@ -70,110 +172,10 @@ pub fn test_components() {
   assert_eq!(false, Components(None, None, None, Some(TxId(999))).matches(&d));
 }
 
-#[derive(Debug)]
-pub struct TestDb(Vec<Datom>);
-
-impl TestDb {
-  pub fn new() -> Self {
-    TestDb(vec![])
-  }
-}
-
-impl Db for TestDb {
-  fn transact<T: Into<Fact>>(&mut self, _tx: &[T]) -> TxId {
-    unimplemented!()
-  }
-
-  fn store_datoms(&mut self, datoms: &[Datom]) {
-    self.0.clear();
-    self.0.extend_from_slice(datoms);
-  }
-
-  #[cfg(test)]
-  fn all_datoms<'a>(&'a self) -> Datoms<'a> {
-    Cow::Borrowed(&self.0)
-  }
-
-
-  fn datoms<'a, C: Borrow<Components>>(&'a self, index: Index, components: C) -> Datoms {
-    let mut datoms = self.0.clone();
-    datoms.retain(|d| components.borrow().matches(&d));
-
-    datoms.sort_by(|l,r| {
-      use std::cmp::Ordering;
-      macro_rules! cmp {
-        ($i:ident) => (l.$i.cmp(&r.$i));
-        ($($i:ident),*) => {
-          [$(cmp!($i)),*].into_iter().fold(Ordering::Equal, |o, x| o.then(*x))
-
-        };
-      }
-
-      match index {
-        Index::Eavt => cmp!(tx, entity, attribute, value),
-      }
-    });
-
-    struct EavEquality(Datom);
-
-    impl PartialEq for EavEquality {
-      fn eq(&self, rhs: &EavEquality) -> bool {
-        let EavEquality(ref lhs) = *self;
-        let EavEquality(ref rhs) = *rhs;
-        lhs.entity == rhs.entity
-          && lhs.attribute == rhs.attribute
-          && lhs.value == rhs.value
-      }
-    }
-
-    use std::collections::BTreeMap;
-    use std::collections::btree_map::Entry;
-
-    let mut ds: BTreeMap<(EntityId,Attribute), (&Value, TxId, Status)> = BTreeMap::new();
-
-    for d in datoms.iter() {
-      let item = (d.entity, d.attribute);
-
-      match ds.entry(item) {
-        Entry::Vacant(_) if d.status == Status::Retracted => { }
-        Entry::Vacant(e)       => { e.insert((&d.value, d.tx, d.status)); }
-        Entry::Occupied(mut e) => {
-          let (value, tx, _) = *e.get();
-          if d.tx > tx {
-            match d.status {
-              // Newer datom was added, replace it
-              Status::Added => {
-                e.insert((&d.value, d.tx, d.status));
-              },
-              // If retracted and the retracted value matches the
-              // datom's value, apply retraction
-              Status::Retracted if *value == d.value => {
-                e.remove();
-              },
-              Status::Retracted => {}
-            }
-          }
-        }
-      }
-    }
-
-    let datoms = ds.into_iter()
-      .map(|((e,a),(v, tx, s))| {
-        Datom {
-          entity: e,
-          attribute: a,
-          value: v.clone(),
-          tx: tx,
-          status: s,
-        }
-      })
-      .collect();
-
-    Cow::Owned(datoms)
-  }
-}
 
 pub fn test_entity<D: Db>(mut db: D) {
+  use tests::data::*;
+
   db.store_datoms(&tests::data::make_test_data());
   validate_datoms(&db.all_datoms());
 
@@ -181,16 +183,19 @@ pub fn test_entity<D: Db>(mut db: D) {
 
   let heinz = db.entity(EntityId(1)).values;
   assert_eq!(heinz.len(), 2);
-  assert_eq!(heinz.get(&tests::data::person_name), Some(&Value::Str("Heinz".into())));
-  assert_eq!(heinz.get(&tests::data::person_age), Some(&Value::Int(42)));
-  assert_eq!(heinz.get(&tests::data::album_name), None);
+  assert_eq!(heinz.get(&person_name), Some(&vec![Value::Str("Heinz".into())]));
+  assert_eq!(heinz.get(&person_age), Some(&vec![Value::Int(42)]));
+  assert_eq!(heinz.get(&album_name), None);
 
   let karl  = db.entity(EntityId(2)).values;
-  assert_eq!(karl.len(), 1);
+  assert_eq!(karl.len(), 2);
+  assert_eq!(karl[&person_name], vec![Value::Str("Karl".into())]);
+  assert_eq!(karl[&person_children], vec![Value::Str("Philipp".into()),
+                                          Value::Str("Jens".into())]);
 
   let nevermind = db.entity(EntityId(3)).values;
   assert_eq!(nevermind.len(), 1);
-  assert_eq!(nevermind.get(&tests::data::album_name), Some(&Value::Str("Nevermind".into())));
+  assert_eq!(nevermind.get(&tests::data::album_name), Some(&vec![Value::Str("Nevermind".into())]));
 }
 
 pub fn test_datoms<D: Db>(mut db: D) {
@@ -199,16 +204,20 @@ pub fn test_datoms<D: Db>(mut db: D) {
   let pn = tests::data::person_name;
   let pa = tests::data::person_age;
   let an = tests::data::album_name;
-  
+  let pc = tests::data::person_children;
+
   let heinz     = EntityId(1);
   let karl      = EntityId(2);
   let nevermind = EntityId(3);
 
   let eavt = db.datoms(Index::Eavt, Components::empty());
-  assert_eq!(eavt.iter().map(|d| d.entity).collect::<Vec<_>>(),
-             vec![heinz,heinz,karl,nevermind]);
-  assert_eq!(eavt.iter().map(|d| d.attribute).collect::<Vec<_>>(),
-             vec![pn, pa, pn, an]);
+  assert_eq!(eavt.iter().map(|d| (d.attribute, d.entity)).collect::<Vec<_>>(),
+             vec![(pn, heinz),
+                  (pa, heinz),
+                  (pn, karl),
+                  (pc, karl),
+                  (pc, karl),
+                  (an, nevermind)]);
 
   // None
   let eavt = db.datoms(Index::Eavt, Components(Some(EntityId(99999)), None, None, None));
@@ -248,6 +257,15 @@ pub fn test_db_equality<D: Db, E: Db>(mut db1: D, mut db2: E) {
   db1.store_datoms(&tests::data::make_test_data());
   db2.store_datoms(&tests::data::make_test_data());
 
+  /*
+  for (a,b) in db1.all_datoms().iter().zip(db2.all_datoms().iter()) {
+    println!("lhs: {:?}", a);
+    println!("rhs: {:?}", b);
+    println!("==========================");
+  }
+   */
+
+
   assert_eq!(db1.all_datoms(), db2.all_datoms());
 
   use ::tests::data::person_name;
@@ -256,6 +274,7 @@ pub fn test_db_equality<D: Db, E: Db>(mut db1: D, mut db2: E) {
               Components(Some(EntityId(1)),   None,              None, None),
               Components(Some(EntityId(999)), None,              None, None),
               Components(None,                Some(person_name), None, None)].into_iter() {
+
       assert_eq!(db1.datoms(idx, c),
                  db2.datoms(idx, c));
     }

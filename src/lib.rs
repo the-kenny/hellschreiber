@@ -1,8 +1,10 @@
 #[cfg(test)] extern crate rand;
 extern crate rusqlite;
+// #[macro_use] extern crate log;
 
 pub mod sqlite;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::borrow::Borrow;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
@@ -23,7 +25,22 @@ pub struct TxId(i64);
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub enum Status {
   Added,
-  Retracted
+  Retracted(TxId)
+}
+
+impl Status {
+  fn is_retraction(&self) -> bool {
+    self.retraction_tx().is_some()
+  }
+
+  fn is_assertion(&self) -> bool { *self == Status::Added }
+
+  fn retraction_tx(&self) -> Option<TxId> {
+    match *self {
+      Status::Retracted(tx) => Some(tx),
+      _                     => None
+    }
+  }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
@@ -38,12 +55,10 @@ pub struct Datom {
 type TempId = EntityId;
 type Fact   = (TempId, Attribute, Value, Status);
 
-use std::collections::BTreeMap;
-
 #[allow(dead_code)]
 pub struct Entity<'a, D: Db + 'a> {
   db: &'a D,
-  values: BTreeMap<Attribute, Value>,
+  values: BTreeMap<Attribute, Vec<Value>>,
 }
 
 use std::borrow::Cow;
@@ -89,38 +104,31 @@ pub trait Db: Sized {
 
   fn entity<'a>(&'a self, entity: EntityId) -> Entity<'a, Self> {
     let datoms = self.datoms(Index::Eavt, Components::empty());
-    let mut attrs: BTreeMap<Attribute, (TxId, &Datom)> = Default::default();
+    let mut attrs: BTreeMap<Attribute, BTreeSet<&Datom>> = Default::default();
 
     for d in datoms.into_iter().filter(|d| d.entity == entity) {
-      use std::collections::btree_map::Entry;
-
-      let entry = (d.tx, d);
-      match attrs.entry(d.attribute) {
-        Entry::Vacant(e) => { e.insert(entry); }
-        Entry::Occupied(mut e) => {
-          let &(db_tx, db_d) = e.get();
-          if d.tx > db_tx {
-            match d.status {
-              // Newer datom was added, replace it
-              Status::Added => {
-                e.insert(entry);
-              },
-              // If retracted and the retracted value matches the
-              // datom's value, apply retraction
-              Status::Retracted if d.value == db_d.value => {
-                e.remove();
-              },
-              // Retraction with wrong value. Ignore. TODO: Log warning
-              Status::Retracted => (),
-            }
-          }
+      let entry = attrs.entry(d.attribute)
+        .or_insert_with(|| BTreeSet::new());
+      
+      match d.status {
+        Status::Added => {
+          entry.insert(&d);
+        },
+        Status::Retracted(_) if entry.contains(&d) => {
+          entry.remove(&d);
+        },
+        Status::Retracted(_) => {
+          unreachable!()
         }
       }
     }
 
-    let values = attrs.values()
-      .map(|&(_,d)| (d.attribute, d.value.clone()))
-      .collect();
+    let values = attrs.into_iter()
+      .map(|(a, ds)| {
+        let mut d: Vec<_> = ds.into_iter().collect();
+        d.sort_by_key(|d| d.tx);
+        (a, d.into_iter().map(|d| d.value.clone()).collect())
+      }).collect();
 
     Entity {
       db: self,
