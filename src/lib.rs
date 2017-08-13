@@ -20,7 +20,13 @@ pub enum Value {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
-pub struct TxId(i64);
+pub struct TxId(EntityId);
+
+// impl TxId {
+//   fn resolve<'a, D: Db>(self, db: &'a D) -> Entity<'a, D> {
+//     db.entity(self.0)
+//   }
+// }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub enum Status {

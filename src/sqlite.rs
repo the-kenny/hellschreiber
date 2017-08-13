@@ -201,43 +201,59 @@ impl Db for SqliteDb {
   }
 }
 
-use rusqlite::types::{ValueRef, ToSqlOutput, FromSqlResult};
+mod type_impls {
+  use super::*;
 
-impl rusqlite::types::FromSql for Status {
-  fn column_result(value: rusqlite::types::ValueRef) -> FromSqlResult<Self> {
-    match value {
-      ValueRef::Null       => Ok(Status::Added),
-      ValueRef::Integer(tx) => Ok(Status::Retracted(TxId(tx))),
-      _                    => unimplemented!()
+  use rusqlite::types;
+  use rusqlite::types::{ValueRef, ToSqlOutput, FromSqlResult};
+
+  impl types::FromSql for Status {
+    fn column_result(value: types::ValueRef) -> FromSqlResult<Self> {
+      match value {
+        ValueRef::Null       => Ok(Status::Added),
+        ValueRef::Integer(tx) => Ok(Status::Retracted(TxId(EntityId(tx)))),
+        _                    => unimplemented!()
+      }
     }
   }
-}
 
-impl rusqlite::types::ToSql for Status {
-  fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
-    match *self {
-      Status::Added     => Ok(rusqlite::types::Null.into()),
-      Status::Retracted(tx) => Ok(tx.0.into()),
+  impl types::ToSql for Status {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
+      match *self {
+        Status::Added => Ok(types::Null.into()),
+        Status::Retracted(TxId(EntityId(tx))) => Ok(tx.into()),
+      }
     }
   }
-}
 
-
-impl rusqlite::types::FromSql for Value {
-  fn column_result(value: ValueRef) -> FromSqlResult<Self> {
-    match value {
-      ValueRef::Text(t)    => Ok(Value::Str(t.into())),
-      ValueRef::Integer(i) => Ok(Value::Int(i)),
-      _                    => unreachable!() // TODO
+  impl types::FromSql for Value {
+    fn column_result(value: ValueRef) -> FromSqlResult<Self> {
+      match value {
+        ValueRef::Text(t)    => Ok(Value::Str(t.into())),
+        ValueRef::Integer(i) => Ok(Value::Int(i)),
+        _                    => unreachable!() // TODO
+      }
     }
   }
-}
 
-impl rusqlite::types::ToSql for Value {
-  fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
-    match self {
-      &Value::Str(ref s) => Ok(ToSqlOutput::Borrowed(ValueRef::Text(s))),
-      &Value::Int(i)     => Ok(ToSqlOutput::Owned(rusqlite::types::Value::Integer(i)))
+  impl types::ToSql for Value {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
+      match self {
+        &Value::Str(ref s) => Ok(ToSqlOutput::Borrowed(ValueRef::Text(s))),
+        &Value::Int(i)     => Ok(ToSqlOutput::Owned(types::Value::Integer(i)))
+      }
+    }
+  }
+
+  impl types::FromSql for EntityId {
+    fn column_result(value: types::ValueRef) -> FromSqlResult<Self> {
+      value.as_i64().map(EntityId)
+    }
+  }
+
+  impl types::ToSql for EntityId {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
+      Ok(types::Value::Integer(self.0).into())
     }
   }
 }

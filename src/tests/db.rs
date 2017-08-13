@@ -152,7 +152,7 @@ pub fn test_components() {
     entity:    EntityId(42),
     attribute: Attribute(EntityId(1)),
     value:     Value::Int(23),
-    tx:        TxId(10),
+    tx:        TxId(EntityId(10)),
     status:    Status::Added,
   };
 
@@ -169,7 +169,7 @@ pub fn test_components() {
   assert_eq!(false, Components(Some(EntityId(999)), None, None, None).matches(&d));
   assert_eq!(false, Components(None, Some(Attribute(EntityId(999))), None, None).matches(&d));
   assert_eq!(false, Components(None, None, Some(Value::Int(1000)),None).matches(&d));
-  assert_eq!(false, Components(None, None, None, Some(TxId(999))).matches(&d));
+  assert_eq!(false, Components(None, None, None, Some(TxId(EntityId(999)))).matches(&d));
 }
 
 
