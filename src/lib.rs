@@ -61,6 +61,10 @@ pub struct Entity<'a, D: Db + 'a> {
   values: BTreeMap<Attribute, Vec<Value>>,
 }
 
+impl<'a, D: Db> Entity<'a, D> {
+  // TODO
+}
+
 use std::borrow::Cow;
 pub type Datoms<'a> = Cow<'a, [Datom]>;
 
@@ -71,6 +75,22 @@ pub enum Index {
   // Aevt,
   // Vaet,
 }
+
+// TODO: AVET, AEVT, VAET
+
+// VAET is used for navigating relations backwards and stores all
+// datoms with *reference* attributes. Given VAET, you can not only find
+// out whom John follows (“John” :follows ?x), but also efficiently
+// lookup who follows John (?x :follows “John”).
+
+// AEVT allows efficient access to all entities with a given attribute5
+
+// AVET provides efficient lookup by value and stores datoms with
+// attributes marked as unique or index in schema. Attributes of this
+// kind are good for external ids. AVET is the most problematic index
+// in practice, and it’s better if you can manage to put monotonic
+// values in it, or use it sparingly.
+
 
 #[derive(Debug)]
 pub struct Components(Option<EntityId>,
@@ -123,6 +143,9 @@ pub trait Db: Sized {
       }
     }
 
+    // Assert all datoms are of the same entity
+    assert!(attrs.values().flat_map(|x| x).all(|d| d.entity == entity));
+    
     let values = attrs.into_iter()
       .map(|(a, ds)| {
         let mut d: Vec<_> = ds.into_iter().collect();
