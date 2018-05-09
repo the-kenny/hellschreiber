@@ -333,6 +333,7 @@ pub trait Db: Sized {
     EntityId(std::cmp::max(n, 1000))
   }
 
+  // TODO: Return `Result<TransactionData, Error>`
   fn transact<O: Into<Operation>, I: IntoIterator<Item=O>>(&mut self, tx: I) -> TransactionData {
     let tx_eid = self.highest_eid();
 
@@ -360,6 +361,10 @@ pub trait Db: Sized {
           Operation::Retraction(eid, a, v)      => (eid,        a, v, Status::Retracted(tx_eid)),
           Operation::TempidAssertion(tid, a, v) => (eids[&tid], a, v, Status::Added)
         };
+
+        if !self.attribute_name(&a).is_some() {
+          panic!("Attribute {:?} has no db/ident (trying to assert/retract fact {:?})", a, (e, a, v, status))
+        }
 
         Datom {
           entity: e,
@@ -464,10 +469,14 @@ mod tests {
         #[test] fn test_entity() {super::db::test_entity($t);}
         #[test] fn test_seed_datoms() {super::db::test_seed_datoms($t);}
         #[test] fn test_datoms() {super::db::test_datoms($t);}
-        #[test] fn test_db_self_equality() {super::db::test_db_equality($t, $t);}
-        #[test] fn test_db_fn_attribute() {super::db::test_fn_attribute($t)}
-        #[test] fn test_db_metadata() { super::db::test_db_metadata($t) }
+        #[test] fn test_self_equality() {super::db::test_db_equality($t, $t);}
+        #[test] fn test_fn_attribute() {super::db::test_fn_attribute($t)}
+        #[test] fn test_metadata() { super::db::test_db_metadata($t) }
         #[test] fn test_string_attributes() { super::db::test_string_attributes($t) }
+
+        #[test]
+        #[should_panic]
+        fn test_transact_panics_for_unknown_attributes() { super::db::test_transact_panics_for_unknown_attributes($t) }
 
         #[test] fn test_usage_001() { super::usage::test_usage_001($t) }
       }

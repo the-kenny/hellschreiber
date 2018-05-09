@@ -208,3 +208,8 @@ pub fn test_string_attributes<D: Db>(mut db: D) {
   // let tx = [(Assert, TempId(42), "db/ident", "xx")];
   // db.transact(&tx);
 }
+
+pub fn test_transact_panics_for_unknown_attributes<D: Db>(mut db: D) {
+  let tx = [(Assert, TempId(42), Attribute(db.highest_eid()), "xx")];
+  db.transact(&tx);
+}
