@@ -2,6 +2,9 @@ extern crate rusqlite;
 
 use super::*;
 
+use std::path::Path;
+
+#[derive(Debug)]
 pub struct SqliteDb {
   conn: rusqlite::Connection,
 }
@@ -9,21 +12,48 @@ pub struct SqliteDb {
 impl SqliteDb {
   pub fn new() -> Self {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    // let conn = rusqlite::Connection::open("test.sqlite").unwrap();
 
     conn.execute_batch(include_str!("schema.sql"))
       .unwrap();
 
-    SqliteDb { conn: conn }
+    let mut db = SqliteDb { conn: conn };
+    db.store_datoms(&seed_datoms());
+    db
   }
 
+  pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, rusqlite::Error> {
+    let conn = rusqlite::Connection::open(path).unwrap();
+
+    if !Self::has_sqlite_table(&conn, "datoms")? {
+      conn.execute_batch(include_str!("schema.sql"))
+        .unwrap();
+    }
+
+    let mut db = SqliteDb { conn: conn };
+
+    if db.attribute("db/ident").is_none() {
+      db.store_datoms(&seed_datoms());
+    }
+
+    Ok(db)
+  }
+
+  fn has_sqlite_table(conn: &rusqlite::Connection, table: &str) -> Result<bool, rusqlite::Error> {
+    match conn.query_row("SELECT name FROM sqlite_master WHERE type='table' AND name=?1", &[&table], |_| true) {
+      Ok(b) => Ok(b),
+      Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+      err => err
+    }
+  }
+
+  // TODO: Get rid of this
   #[cfg(test)]
   fn make_datom(row: &rusqlite::Row) -> Datom {
     Datom {
       entity: EntityId(row.get(0)),
-      attribute: Attribute(EntityId(row.get(1))),
+      attribute: Attribute::new(EntityId(row.get(1))),
       value: row.get(2),
-      tx: TxId(row.get(3)),
+      tx: row.get(3),
       status: row.get(4),
     }
   }
@@ -31,7 +61,7 @@ impl SqliteDb {
   fn attribute_values(&self,
                       entity: EntityId,
                       attribute: Attribute)
-                      -> Vec<(Attribute, Value, TxId)> {
+                      -> Vec<(EntityId, Attribute, Value, EntityId)> {
     let mut value_query = self.conn.prepare(
       "select v, t
        from datoms
@@ -41,12 +71,84 @@ impl SqliteDb {
 
     let rows = value_query.query_map(&[&entity.0, &(attribute.0).0], |row| {
       let v: Value = row.get(0);
-      let t: TxId = TxId(row.get(1));
+      let t: EntityId = row.get(1);
 
-      (attribute, v, t)
+      (entity, attribute, v, t)
     }).unwrap().map(|x| x.unwrap());
 
     rows.collect()
+  }
+
+  fn sort_datoms(datoms: &mut Vec<Datom>, index: Index) {
+    // TODO: Get rid of this sort-by step
+    datoms.sort_by(|l,r| {
+      use std::cmp::Ordering;
+      macro_rules! cmp {
+        ($i:ident) => (l.$i.cmp(&r.$i));
+        ($($i:ident),*) => {
+          [$(cmp!($i)),*].into_iter().fold(Ordering::Equal, |o, x| o.then(*x))
+        };
+      }
+
+      match index {
+        Index::Eavt => cmp!(entity, tx, attribute, value),
+      }
+    });
+  }
+
+  fn eavt_datoms<'a, C: Borrow<Components>>(&'a self, components: C) -> Datoms {
+    let components = components.borrow();
+
+    let mut query = self.conn.prepare(
+      "select distinct e, a
+       from datoms
+       where case when ?1 NOTNULL then e == ?1 else 1 end
+         and case when ?2 NOTNULL then a == ?2 else 1 end
+         and case when ?3 NOTNULL then v == ?3 else 1 end
+         and case when ?4 NOTNULL then t == ?4 else 1 end
+       order by t asc").unwrap();
+
+
+    let entity_query_input = match components.0 {
+      Some(EntityId(i)) => rusqlite::types::Value::Integer(i),
+      None              => rusqlite::types::Value::Null,
+    };
+
+    let attribute_query_input = match components.1 {
+      Some(Attribute(EntityId(i))) => rusqlite::types::Value::Integer(i),
+      None              => rusqlite::types::Value::Null,
+    };
+
+    use rusqlite::types::{ToSql,ToSqlOutput};
+    let value_query_input = match components.2 {
+      Some(ref v) => v.to_sql().expect("Failed to convert to SQL type"),
+      None        => ToSqlOutput::Owned(rusqlite::types::Value::Null),
+    };
+
+    let tx_query_input = match components.3 {
+      Some(EntityId(i)) => rusqlite::types::Value::Integer(i),
+      None                    => rusqlite::types::Value::Null,
+    };
+
+    let mut datoms = query.query_map(&[&entity_query_input, &attribute_query_input, &value_query_input, &tx_query_input], |row| {
+      let e = EntityId(row.get(0));
+      let a = Attribute::new(EntityId(row.get(1)));
+      (e,a)
+    }).unwrap().map(|r| r.unwrap())
+      .flat_map(|(e, a)| self.attribute_values(e, a))
+      .map(|(e, a, v, tx)| Datom {
+        entity: e,
+        attribute: a,
+        value: v,
+        tx: tx,
+        status: Status::Added,
+      })
+      .collect::<Vec<_>>();
+
+    // TODO: Get rid of this step
+    Self::sort_datoms(&mut datoms, Index::Eavt);
+
+    Cow::Owned(datoms)
   }
 }
 
@@ -99,65 +201,21 @@ impl Db for SqliteDb {
     Cow::Owned(datoms)
   }
 
-  fn transact<T: Into<Fact>>(&mut self, _tx: &[T]) -> TxId {
-    unimplemented!()
-  }
+  // fn transact<T: Into<Fact>>(&mut self, _tx: &[T]) -> TxId {
+  //   // Note: This storage uses a special behavior for transactions: If
+  //   // a datom is retracted, we just set the `retracted_tx` in sqlite.
+  //   // This allows efficient querying of values as well as recreating
+  //   // the history of retractions. Care must be taken when returning a
+  //   // "history database" which contains all assertions and
+  //   // retractions
+
+  //   unimplemented!("Transact isn't implemented")
+  // }
 
   fn datoms<'a, C: Borrow<Components>>(&'a self, index: Index, components: C) -> Datoms {
-    assert!(index == Index::Eavt);
-
-    // TODO: Add validity tests
-
-    let components = components.borrow();
-    match *components {
-      Components(_, _, Some(_), _) => panic!("Components(_, _, Some(...), _) isn't implemented yet"),
-      Components(_, _, _, Some(_)) => panic!("Components(_, _, _, Some(...)) isn't implemented yet"),
-      _ => ()
+    match index {
+      Index::Eavt => self.eavt_datoms(components),
     }
-
-    let mut entity_query = self.conn.prepare(
-      "select distinct e
-       from datoms
-       where case when ?1 NOTNULL then e == ?1 else 1 end
-       order by t asc ").unwrap();
-
-    let mut attribute_query = self.conn.prepare(
-      "select distinct a
-       from datoms
-       where e = ?1
-       and case when ?2 NOTNULL then a == ?2 else 1 end
-       order by t asc").unwrap();
-
-    let entity_query_input = match components.0 {
-      Some(EntityId(i)) => rusqlite::types::Value::Integer(i),
-      None              => rusqlite::types::Value::Null,
-    };
-
-    let entities = entity_query.query_map(&[&entity_query_input], |row| {
-      let e: EntityId = EntityId(row.get(0));
-
-      let attribute_query_input = match components.1 {
-        Some(Attribute(EntityId(i))) => rusqlite::types::Value::Integer(i),
-        None                         => rusqlite::types::Value::Null,
-      };
-
-      let datoms = attribute_query.query_map(&[&e.0, &attribute_query_input], |attr_row| {
-        Attribute(EntityId(attr_row.get(0)))
-      }).unwrap().map(|x| x.unwrap())
-        .flat_map(|a| self.attribute_values(e, a))
-        .map(|(a, v, tx)| Datom {
-          entity: e,
-          attribute: a,
-          value: v,
-          tx: tx,
-          status: Status::Added,
-        });
-      datoms.collect::<Vec<_>>()
-    }).unwrap()
-      .flat_map(|x| x.unwrap())
-      .collect::<Vec<Datom>>();
-
-    Cow::Owned(entities)
   }
 
   fn store_datoms(&mut self, datoms: &[Datom]) {
@@ -179,7 +237,7 @@ impl Db for SqliteDb {
       for d in added {
         assert!(d.status == Status::Added);
         insert.execute(&[&(d.entity.0),
-                         &(d.attribute.0).0,
+                         &d.attribute.0,
                          &d.value,
                          &d.tx.0,
                          &d.status])
@@ -190,8 +248,8 @@ impl Db for SqliteDb {
         assert!(d.status.is_retraction());
         let retracted_tx = d.status.retraction_tx().unwrap();
         retract.execute(&[&retracted_tx.0,
-                          &(d.entity.0),
-                          &(d.attribute.0).0,
+                          &d.entity.0,
+                          &d.attribute.0,
                           &d.value])
           .unwrap();
       }
@@ -210,9 +268,9 @@ mod type_impls {
   impl types::FromSql for Status {
     fn column_result(value: types::ValueRef) -> FromSqlResult<Self> {
       match value {
-        ValueRef::Null       => Ok(Status::Added),
-        ValueRef::Integer(tx) => Ok(Status::Retracted(TxId(EntityId(tx)))),
-        _                    => unimplemented!()
+        ValueRef::Null        => Ok(Status::Added),
+        ValueRef::Integer(tx) => Ok(Status::Retracted(EntityId(tx))),
+        _                     => unreachable!()
       }
     }
   }
@@ -221,7 +279,7 @@ mod type_impls {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
       match *self {
         Status::Added => Ok(types::Null.into()),
-        Status::Retracted(TxId(EntityId(tx))) => Ok(tx.into()),
+        Status::Retracted(EntityId(tx)) => Ok(tx.into()),
       }
     }
   }

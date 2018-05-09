@@ -1,26 +1,53 @@
 #[cfg(test)] extern crate rand;
 extern crate rusqlite;
+extern crate edn;
 // #[macro_use] extern crate log;
 
 pub mod sqlite;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::borrow::Borrow;
+use std::fmt;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub struct EntityId(i64);
 
+pub type TxId = EntityId;
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
+pub struct Ref(EntityId);
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub struct Attribute(EntityId);
+
+impl Attribute {
+  fn new(id: EntityId) -> Self {
+    Attribute(id)
+  }
+}
+
+pub trait ToAttribute {
+  fn to_attribute<D: Db>(&self, db: &D) -> Option<Attribute>;
+}
+
+impl ToAttribute for Attribute {
+  fn to_attribute<D: Db>(&self, _db: &D) -> Option<Attribute> {
+    Some(*self)
+  }
+}
+
+impl<'a> ToAttribute for &'a str {
+  fn to_attribute<D: Db>(&self, db: &D) -> Option<Attribute> {
+    db.attribute(self)
+  }
+}
 
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum Value {
   Str(String),
   Int(i64),
+  // TODO: Ref
 }
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
-pub struct TxId(EntityId);
 
 // impl TxId {
 //   fn resolve<'a, D: Db>(self, db: &'a D) -> Entity<'a, D> {
@@ -31,7 +58,7 @@ pub struct TxId(EntityId);
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub enum Status {
   Added,
-  Retracted(TxId)
+  Retracted(EntityId)
 }
 
 impl Status {
@@ -41,7 +68,7 @@ impl Status {
 
   fn is_assertion(&self) -> bool { *self == Status::Added }
 
-  fn retraction_tx(&self) -> Option<TxId> {
+  fn retraction_tx(&self) -> Option<EntityId> {
     match *self {
       Status::Retracted(tx) => Some(tx),
       _                     => None
@@ -54,17 +81,66 @@ pub struct Datom {
   pub entity:    EntityId,
   pub attribute: Attribute,
   pub value:     Value,
-  pub tx:        TxId,
+  pub tx:        EntityId,
   pub status:    Status,
 }
 
-type TempId = EntityId;
-type Fact   = (TempId, Attribute, Value, Status);
+impl Datom {
+  pub fn from_edn<D: Db>(db: &D, edn: edn::Value) -> Result<Self, ()> {
+    use edn::Value::*;
+
+    if let Vector(x) = edn {
+      if x.len() != 4 { return Err(()) }
+
+      let mut x = x.into_iter();
+      let e = x.next().unwrap();
+      let a = x.next().unwrap();
+      let v = x.next().unwrap();
+      let t = x.next().unwrap();
+
+      match (e,a,v,t) {
+        (Integer(e), Keyword(a), v, Integer(t)) => {
+          let v = match v {
+            String(s)  => Value::Str(s),
+            Integer(i) => Value::Int(i),
+            x          => unimplemented!("Conversion from EDN value {:?} isn't implemented", x),
+          };
+
+          let a = db.attribute(&a).unwrap();
+
+          let d = Datom {
+            entity: EntityId(e),
+            attribute: a, // TODO
+            value: v,
+            tx: EntityId(t),
+            status: Status::Added,
+          };
+
+          println!("{:?}", d);
+        },
+        _ => unreachable!()
+      }
+    }
+
+    unimplemented!("Implementation of from_edn")
+  }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
+pub struct TempId(pub i64);
+
+type Fact = (TempId, Attribute, Value, Status);
 
 #[allow(dead_code)]
 pub struct Entity<'a, D: Db + 'a> {
   db: &'a D,
   values: BTreeMap<Attribute, Vec<Value>>,
+}
+
+impl<'a, D: Db> fmt::Debug for Entity<'a, D> {
+  fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    write!(f, "<Entity {:?}>", self.values)
+  }
 }
 
 impl<'a, D: Db> Entity<'a, D> {
@@ -97,7 +173,6 @@ pub enum Index {
 // in practice, and it’s better if you can manage to put monotonic
 // values in it, or use it sparingly.
 
-
 #[derive(Debug)]
 pub struct Components(Option<EntityId>,
                       Option<Attribute>,
@@ -109,6 +184,22 @@ impl Components {
     Components(None, None, None, None)
   }
 
+  pub fn e(e: EntityId) -> Self {
+    Components(Some(e), None, None, None)
+  }
+
+  pub fn ea(e: EntityId, a: Attribute) -> Self {
+    Components(Some(e), Some(a), None, None)
+  }
+
+  pub fn eav(e: EntityId, a: Attribute, v: Value) -> Self {
+    Components(Some(e), Some(a), Some(v), None)
+  }
+
+  pub fn eavt(e: EntityId, a: Attribute, v: Value, t: TxId) -> Self {
+    Components(Some(e), Some(a), Some(v), Some(t))
+  }
+  
   pub fn matches(&self, datom: &Datom) -> bool {
     let &Components(e, a, ref v, t) = self;
 
@@ -121,11 +212,111 @@ impl Components {
   }
 }
 
+pub mod attr {
+  #![allow(non_upper_case_globals)]
+  use super::{Attribute, EntityId};
+  pub const ident:       Attribute = Attribute(EntityId(10));
+  pub const doc:         Attribute = Attribute(EntityId(11));
+  // pub const valueType:   Attribute = Attribute(EntityId(12));
+  // pub const cardinality: Attribute = Attribute(EntityId(13));
+  // pub const unique:      Attribute = Attribute(EntityId(14));
+}
+
+fn seed_datoms() -> Datoms<'static> {
+  // db/ident
+  let ident = Datom {
+    entity: attr::ident.0,
+    attribute: attr::ident,
+    value: Value::Str("db/ident".into()),
+    tx: EntityId(0),
+    status: Status::Added,
+  };
+
+  let doc = Datom {
+    entity: attr::doc.0,
+    attribute: attr::ident,
+    value: Value::Str("db/doc".into()),
+    tx: EntityId(0),
+    status: Status::Added,
+  };
+  
+  let ident_doc = Datom {
+    entity: attr::ident.0,
+    attribute: attr::doc,
+    value: Value::Str("Unique identifier for an entity.".into()),
+    tx: EntityId(0),
+    status: Status::Added,
+  };
+
+  let doc_doc = Datom {
+    entity: attr::doc.0,
+    attribute: attr::doc,
+    value: Value::Str("Description of an attribute.".into()),
+    tx: EntityId(0),
+    status: Status::Added,
+  };
+
+  let datoms = vec![ident, doc, ident_doc, doc_doc];
+
+  Cow::Owned(datoms)
+}
+
+#[derive(Debug, Clone)]
+pub struct TransactionData {
+  pub tx_id: TxId,
+  pub tempid_mappings: BTreeMap<TempId, EntityId>
+}
+
+// TODO: Add `is_initialized?` and `initialize`
 pub trait Db: Sized {
   #[cfg(test)]
   fn all_datoms<'a>(&'a self) -> Datoms<'a>;
 
-  fn transact<T: Into<Fact>>(&mut self, tx: &[T]) -> TxId;
+  fn highest_eid(&mut self) -> EntityId {
+    if let Some(entity) = self.datoms(Index::Eavt, Components::empty()).into_iter()
+      .last() {
+        entity.entity
+      } else {
+        EntityId(100)
+      }
+  }
+  
+  fn transact(&mut self, tx: &[Fact]) -> TransactionData {
+    let tx_eid = self.highest_eid();
+    
+    let eids = {
+      let mut eids = BTreeMap::new();
+      let mut highest_eid = tx_eid.0;
+      for fact in tx {
+        let tid = fact.0;
+        eids.entry(tid)
+          .or_insert_with(|| {
+            highest_eid += 1;
+            EntityId(highest_eid)
+          });
+      }
+      eids
+    };
+
+    let datoms = tx.into_iter()
+      .map(|&(tid, a, ref v, status)| {
+        Datom {
+          entity: eids[&tid],
+          attribute: a,
+          value: v.clone(),
+          tx: tx_eid,
+          status: status
+        }
+      }).collect::<Vec<Datom>>();
+
+    self.store_datoms(&datoms);
+
+    TransactionData {
+      tx_id: tx_eid,
+        tempid_mappings: eids,
+    }
+  }
+
   fn datoms<'a, C: Borrow<Components>>(&'a self, index: Index, components: C) -> Datoms<'a>;
 
   fn entity<'a>(&'a self, entity: EntityId) -> Entity<'a, Self> {
@@ -135,7 +326,7 @@ pub trait Db: Sized {
     for d in datoms.into_iter().filter(|d| d.entity == entity) {
       let entry = attrs.entry(d.attribute)
         .or_insert_with(|| BTreeSet::new());
-      
+
       match d.status {
         Status::Added => {
           entry.insert(&d);
@@ -151,7 +342,7 @@ pub trait Db: Sized {
 
     // Assert all datoms are of the same entity
     assert!(attrs.values().flat_map(|x| x).all(|d| d.entity == entity));
-    
+
     let values = attrs.into_iter()
       .map(|(a, ds)| {
         let mut d: Vec<_> = ds.into_iter().collect();
@@ -165,8 +356,13 @@ pub trait Db: Sized {
     }
   }
 
-  fn store_datoms(&mut self, _datoms: &[Datom]) {
-    unimplemented!()
+  fn store_datoms(&mut self, _datoms: &[Datom]);
+
+  fn attribute(&self, attribute_name: &str) -> Option<Attribute> {
+    // TODO: Use VAET
+    self.datoms(Index::Eavt, Components(None, Some(attr::ident), Some(Value::Str(attribute_name.into())), None))
+      .iter().next()
+      .map(|d| Attribute::new(d.entity))
   }
 }
 
@@ -175,6 +371,7 @@ pub trait Db: Sized {
 mod tests {
   mod db;
   mod data;
+  mod in_memory;
 
   #[macro_export]
   macro_rules! test_db_impl {
@@ -182,29 +379,45 @@ mod tests {
       mod $name {
         #[test]
         fn test_entity() {
-          super::db::test_entity(($t));
+          super::db::test_entity($t);
         }
+
+        #[test]
+        fn test_seed_datoms() {
+          super::db::test_seed_datoms($t);
+        }
+
         #[test]
         fn test_datoms() {
-          super::db::test_datoms(($t));
+          super::db::test_datoms($t);
         }
 
         #[test]
         #[allow(unused_parens)]
         fn test_db_other_equality() {
-          let db1 = ::tests::db::TestDb::new();
+          let db1 = ::tests::in_memory::TestDb::new();
           let db2 = ($t);
           super::db::test_db_equality(db1, db2);
         }
 
         #[test]
         fn test_db_self_equality() {
-          super::db::test_db_equality(($t), ($t));
+          super::db::test_db_equality($t, $t);
+        }
+
+        #[test]
+        fn test_db_fn_attribute() {
+          super::db::test_fn_attribute($t)
+        }
+
+        #[test]
+        fn test_db_metadata() {
+          super::db::test_db_metadata($t)
         }
       }
     }
   }
 
-  test_db_impl!(sqlite,    ::sqlite::SqliteDb::new());
-  test_db_impl!(in_memory, ::tests::db::TestDb::new());
+  test_db_impl!(sqlite_db,    ::sqlite::SqliteDb::new());
+  test_db_impl!(in_memory_db, ::tests::in_memory::TestDb::new());
 }
