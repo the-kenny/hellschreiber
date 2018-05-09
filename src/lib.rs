@@ -1,15 +1,14 @@
 #[cfg(test)] extern crate rand;
 extern crate rusqlite;
 extern crate edn;
-// #[macro_use] extern crate log;
+#[macro_use] extern crate lazy_static;
 
 pub mod sqlite;
-
 pub use sqlite::SqliteDb;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::borrow::{Borrow, Cow};
-use std::fmt;
+use std::{fmt, ops};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub struct EntityId(i64);
@@ -171,6 +170,7 @@ impl<'a, V> From<&'a (Retract, EntityId, Attribute, V)> for Operation
 #[allow(dead_code)]
 pub struct Entity<'a, D: Db + 'a> {
   pub db: &'a D,
+  pub eid: EntityId,
   pub values: BTreeMap<Attribute, Vec<Value>>,
 }
 
@@ -180,7 +180,24 @@ impl<'a, D: Db> fmt::Debug for Entity<'a, D> {
       .map(|(attr, value)| (self.db.attribute_name(attr).unwrap(), value))
       .collect();
 
-    write!(f, "<Entity {:?}>", pretty_values)
+    write!(f, "<Entity {:?} {:?}>", self.eid, pretty_values)
+  }
+}
+
+lazy_static! {
+  static ref EMPTY_VEC: Vec<Value> = vec![];
+}
+
+impl<'a, D: Db> ops::Index<&'a str> for Entity<'a, D> {
+  type Output = Vec<Value>;
+  fn index(&self, idx: &'a str) -> &Self::Output {
+    if idx == "db/id" {
+      unimplemented!("Value::Ref or Value::Eid")
+    } else if let Some(attr_id) = self.db.attribute(idx) {
+      &self.values[&attr_id]
+    } else {
+      &EMPTY_VEC
+    }
   }
 }
 
@@ -420,6 +437,7 @@ pub trait Db: Sized {
 
     Entity {
       db: self,
+      eid: entity,
       values: values,
     }
   }
@@ -477,6 +495,8 @@ mod tests {
         #[test]
         #[should_panic]
         fn test_transact_panics_for_unknown_attributes() { super::db::test_transact_panics_for_unknown_attributes($t) }
+        #[test]
+        fn test_entity_index_trait() { super::db::test_entity_index_trait($t) }
 
         #[test] fn test_usage_001() { super::usage::test_usage_001($t) }
       }

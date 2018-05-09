@@ -14,7 +14,7 @@ pub fn test_usage_001<D: Db>(mut db: D) {
   let retract_heinz_name = &[(Retract, heinz, person_name, Value::Str("Heinz".into()))];
   db.transact(retract_heinz_name);
 
-  assert!(db.entity(heinz).values.get(&person_name).is_none());
+  assert!(db.entity(heinz)["person/name"].is_empty());
 }
 
 
