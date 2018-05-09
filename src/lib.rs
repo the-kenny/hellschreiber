@@ -6,7 +6,7 @@ extern crate edn;
 pub mod sqlite;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::borrow::Borrow;
+use std::borrow::{Borrow, Cow};
 use std::fmt;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
@@ -81,7 +81,7 @@ pub struct Datom {
   pub entity:    EntityId,
   pub attribute: Attribute,
   pub value:     Value,
-  pub tx:        EntityId,
+  pub tx:        TxId,
   pub status:    Status,
 }
 
@@ -129,12 +129,39 @@ impl Datom {
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub struct TempId(pub i64);
 
-type Fact = (TempId, Attribute, Value, Status);
+#[derive(Debug)]
+pub enum Operation {
+  Assertion(EntityId, Attribute, Value),
+  Retraction(EntityId, Attribute, Value),
+  TempidAssertion(TempId, Attribute, Value)
+}
+
+pub struct Assert;
+pub struct Retract;
+
+impl<'a> Into<Operation> for &'a (Assert, TempId, Attribute, Value) {
+  fn into(self) -> Operation {
+    Operation::TempidAssertion(self.1, self.2, self.3.clone())
+  }
+}
+
+impl<'a> Into<Operation> for &'a (Assert, EntityId, Attribute, Value) {
+  fn into(self) -> Operation {
+    Operation::Assertion(self.1, self.2, self.3.clone())
+  }
+}
+
+impl<'a> Into<Operation> for &'a (Retract, EntityId, Attribute, Value) {
+  fn into(self) -> Operation {
+    Operation::Retraction(self.1, self.2, self.3.clone())
+  }
+}
+
 
 #[allow(dead_code)]
 pub struct Entity<'a, D: Db + 'a> {
-  db: &'a D,
-  values: BTreeMap<Attribute, Vec<Value>>,
+  pub db: &'a D,
+  pub values: BTreeMap<Attribute, Vec<Value>>,
 }
 
 impl<'a, D: Db> fmt::Debug for Entity<'a, D> {
@@ -143,11 +170,6 @@ impl<'a, D: Db> fmt::Debug for Entity<'a, D> {
   }
 }
 
-impl<'a, D: Db> Entity<'a, D> {
-  // TODO
-}
-
-use std::borrow::Cow;
 pub type Datoms<'a> = Cow<'a, [Datom]>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -273,35 +295,45 @@ pub trait Db: Sized {
   fn all_datoms<'a>(&'a self) -> Datoms<'a>;
 
   fn highest_eid(&mut self) -> EntityId {
-    if let Some(entity) = self.datoms(Index::Eavt, Components::empty()).into_iter()
-      .last() {
-        entity.entity
-      } else {
-        EntityId(100)
-      }
+    let n = self.datoms(Index::Eavt, Components::empty())
+      .into_iter()
+      .last()
+      .map(|datom| datom.entity.0)
+      .unwrap_or(0);
+
+    EntityId(std::cmp::max(n, 1000))
   }
   
-  fn transact(&mut self, tx: &[Fact]) -> TransactionData {
+  fn transact<O: Into<Operation>, I: IntoIterator<Item=O>>(&mut self, tx: I) -> TransactionData {
     let tx_eid = self.highest_eid();
+
+    let tx: Vec<Operation> = tx.into_iter().map(|op| op.into()).collect();
     
     let eids = {
       let mut eids = BTreeMap::new();
       let mut highest_eid = tx_eid.0;
-      for fact in tx {
-        let tid = fact.0;
-        eids.entry(tid)
-          .or_insert_with(|| {
-            highest_eid += 1;
-            EntityId(highest_eid)
-          });
+      for operation in tx.iter() {
+        if let &Operation::TempidAssertion(e, _, _) = operation {
+          eids.entry(e)
+            .or_insert_with(|| {
+              highest_eid += 1;
+              EntityId(highest_eid)
+            });
+        }
       }
       eids
     };
 
     let datoms = tx.into_iter()
-      .map(|&(tid, a, ref v, status)| {
+      .map(|operation| {
+        let (e, a, v, status) = match operation.into() {
+          Operation::Assertion(eid, a, v)       => (eid,        a, v, Status::Added),
+          Operation::Retraction(eid, a, v)      => (eid,        a, v, Status::Retracted(tx_eid)),
+          Operation::TempidAssertion(tid, a, v) => (eids[&tid], a, v, Status::Added)
+        };
+
         Datom {
-          entity: eids[&tid],
+          entity: e,
           attribute: a,
           value: v.clone(),
           tx: tx_eid,

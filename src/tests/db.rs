@@ -186,13 +186,13 @@ pub fn test_db_equality<D: Db, E: Db>(mut db1: D, mut db2: E) {
 
 pub fn test_fn_attribute<D: Db>(mut db: D) {
   // TODO: Use `str` as db/ident
-  let schema = &[(TempId(42), attr::ident, Value::Str("person_name".into()), Status::Added),
-                 (TempId(42), attr::doc, Value::Str("The name of a person".into()), Status::Added)];
+  let schema = &[(Assert, TempId(42), attr::ident, Value::Str("person_name".into())),
+                 (Assert, TempId(42), attr::doc, Value::Str("The name of a person".into()))];
   db.transact(schema);
   assert!(db.attribute("person_name").is_some());
 }
 
-pub fn test_db_metadata<D: Db>(mut db: D) {
+pub fn test_db_metadata<D: Db>(db: D) {
   let Attribute(ident_eid) = "db/ident".to_attribute(&db).unwrap();
   let Attribute(doc_eid) = "db/doc".to_attribute(&db).unwrap();
 
