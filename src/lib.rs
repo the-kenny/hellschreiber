@@ -153,14 +153,14 @@ impl<'a, V: Into<Value> + Clone> From<&'a (Assert, TempId, Attribute, V)> for Op
   }
 }
 
-impl<'a, V> From<&'a (Assert, EntityId, Attribute, V)> for Operation 
+impl<'a, V> From<&'a (Assert, EntityId, Attribute, V)> for Operation
   where V: Into<Value> + Clone {
   fn from(o: &'a (Assert, EntityId, Attribute, V)) -> Operation {
     Operation::Assertion(o.1, o.2, o.3.clone().into())
   }
 }
 
-impl<'a, V> From<&'a (Retract, EntityId, Attribute, V)> for Operation 
+impl<'a, V> From<&'a (Retract, EntityId, Attribute, V)> for Operation
   where V: Into<Value> + Clone {
   fn from(o: &'a (Retract, EntityId, Attribute, V)) -> Operation {
     Operation::Retraction(o.1, o.2, o.3.clone().into())
@@ -176,7 +176,11 @@ pub struct Entity<'a, D: Db + 'a> {
 
 impl<'a, D: Db> fmt::Debug for Entity<'a, D> {
   fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-    write!(f, "<Entity {:?}>", self.values)
+    let pretty_values: BTreeMap<_, &Vec<Value>> = self.values.iter()
+      .map(|(attr, value)| (self.db.attribute_name(attr).unwrap(), value))
+      .collect();
+
+    write!(f, "<Entity {:?}>", pretty_values)
   }
 }
 
@@ -231,7 +235,7 @@ impl Components {
   pub fn eavt(e: EntityId, a: Attribute, v: Value, t: TxId) -> Self {
     Components(Some(e), Some(a), Some(v), Some(t))
   }
-  
+
   pub fn matches(&self, datom: &Datom) -> bool {
     let &Components(e, a, ref v, t) = self;
 
@@ -247,14 +251,24 @@ impl Components {
 pub mod attr {
   #![allow(non_upper_case_globals)]
   use super::{Attribute, EntityId};
-  pub const ident:       Attribute = Attribute(EntityId(10));
-  pub const doc:         Attribute = Attribute(EntityId(11));
+  pub const id:    Attribute = Attribute(EntityId(10));
+  pub const ident: Attribute = Attribute(EntityId(11));
+  pub const doc:   Attribute = Attribute(EntityId(12));
   // pub const valueType:   Attribute = Attribute(EntityId(12));
   // pub const cardinality: Attribute = Attribute(EntityId(13));
   // pub const unique:      Attribute = Attribute(EntityId(14));
 }
 
 fn seed_datoms() -> Datoms<'static> {
+  // db/id
+  let id = Datom {
+    entity: attr::id.0,
+    attribute: attr::ident,
+    value: Value::Str("db/id".into()),
+    tx: EntityId(0),
+    status: Status::Added,
+  };
+
   // db/ident
   let ident = Datom {
     entity: attr::ident.0,
@@ -271,7 +285,7 @@ fn seed_datoms() -> Datoms<'static> {
     tx: EntityId(0),
     status: Status::Added,
   };
-  
+
   let ident_doc = Datom {
     entity: attr::ident.0,
     attribute: attr::doc,
@@ -288,7 +302,12 @@ fn seed_datoms() -> Datoms<'static> {
     status: Status::Added,
   };
 
-  let datoms = vec![ident, doc, ident_doc, doc_doc];
+  let datoms = vec![
+    id,
+    ident,
+    doc,
+    ident_doc,
+    doc_doc];
 
   Cow::Owned(datoms)
 }
@@ -313,12 +332,12 @@ pub trait Db: Sized {
 
     EntityId(std::cmp::max(n, 1000))
   }
-  
+
   fn transact<O: Into<Operation>, I: IntoIterator<Item=O>>(&mut self, tx: I) -> TransactionData {
     let tx_eid = self.highest_eid();
 
     let tx: Vec<Operation> = tx.into_iter().map(|op| op.into()).collect();
-    
+
     let eids = {
       let mut eids = BTreeMap::new();
       let mut highest_eid = tx_eid.0;
@@ -363,7 +382,7 @@ pub trait Db: Sized {
 
   fn entity<'a>(&'a self, entity: EntityId) -> Entity<'a, Self> {
     let datoms = self.datoms(Index::Eavt, Components::empty());
-    let mut attrs: BTreeMap<Attribute, BTreeSet<&Datom>> = Default::default();
+    let mut attrs: BTreeMap<Attribute, BTreeSet<&Datom>> = BTreeMap::new();
 
     for d in datoms.into_iter().filter(|d| d.entity == entity) {
       let entry = attrs.entry(d.attribute)
@@ -385,12 +404,14 @@ pub trait Db: Sized {
     // Assert all datoms are of the same entity
     assert!(attrs.values().flat_map(|x| x).all(|d| d.entity == entity));
 
-    let values = attrs.into_iter()
+    let mut values = attrs.into_iter()
       .map(|(a, ds)| {
         let mut d: Vec<_> = ds.into_iter().collect();
         d.sort_by_key(|d| d.tx);
         (a, d.into_iter().map(|d| d.value.clone()).collect())
-      }).collect();
+      }).collect::<BTreeMap<Attribute, Vec<Value>>>();
+
+    values.insert(attr::id, vec![Value::Int(entity.0)]);
 
     Entity {
       db: self,
@@ -405,6 +426,16 @@ pub trait Db: Sized {
     self.datoms(Index::Eavt, Components(None, Some(attr::ident), Some(Value::Str(attribute_name.into())), None))
       .iter().next()
       .map(|d| Attribute::new(d.entity))
+  }
+
+  fn attribute_name<'a>(&'a self, attribute: &Attribute) -> Option<String> {
+    self.datoms(Index::Eavt, Components::ea(attribute.0, attr::ident))
+      .iter().next()
+      .map(|d| d.value.clone())
+      .and_then(|v| match v {
+        Value::Str(s) => Some(s.clone()),
+        _ => None
+      })
   }
 }
 

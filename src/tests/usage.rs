@@ -11,10 +11,10 @@ pub fn test_usage_001<D: Db>(mut db: D) {
                   (Assert, TempId(1), person_name, "Heinz".to_string())];
   let heinz = db.transact(persons).tempid_mappings[&TempId(1)];
 
-  let delete_heinz = &[(Retract, heinz, person_name, Value::Str("Heinz".into()))];
-  db.transact(delete_heinz);
+  let retract_heinz_name = &[(Retract, heinz, person_name, Value::Str("Heinz".into()))];
+  db.transact(retract_heinz_name);
 
-  assert!(db.entity(heinz).values.is_empty());
+  assert!(db.entity(heinz).values.get(&person_name).is_none());
 }
 
 

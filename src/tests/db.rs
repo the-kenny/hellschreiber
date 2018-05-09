@@ -72,8 +72,9 @@ pub fn test_components() {
 }
 
 pub fn test_seed_datoms<D: Db>(db: D) {
+  assert!(db.attribute("db/id")    == Some(attr::id));
   assert!(db.attribute("db/ident") == Some(attr::ident));
-  assert!(db.attribute("db/doc") == Some(attr::doc));
+  assert!(db.attribute("db/doc")   == Some(attr::doc));
 
   // TODO: Check if `db/doc` is set for all entities
 }
@@ -84,22 +85,24 @@ pub fn test_entity<D: Db>(mut db: D) {
   db.store_datoms(&tests::data::make_test_data());
   validate_datoms(&db.all_datoms());
 
-  assert_eq!(db.entity(EntityId(99999)).values.len(), 0);
+  assert_eq!(db.entity(EntityId(99999)).values.len(), 1);
+  assert_eq!(db.entity(EntityId(99999)).values[&attr::id], vec![Value::Int(99999)]);
 
   let heinz = db.entity(EntityId(1)).values;
-  assert_eq!(heinz.len(), 2);
+  assert_eq!(heinz.len(), 3);   // name + age + db/id
+  assert_eq!(heinz.get(&attr::id), Some(&vec![Value::Int(1)]));
   assert_eq!(heinz.get(&person_name), Some(&vec![Value::Str("Heinz".into())]));
   assert_eq!(heinz.get(&person_age), Some(&vec![Value::Int(42)]));
   assert_eq!(heinz.get(&album_name), None);
 
   let karl  = db.entity(EntityId(2)).values;
-  assert_eq!(karl.len(), 2);
+  assert_eq!(karl.len(), 3);    // name + children + db/id
   assert_eq!(karl[&person_name], vec![Value::Str("Karl".into())]);
   assert_eq!(karl[&person_children], vec![Value::Str("Philipp".into()),
                                           Value::Str("Jens".into())]);
 
   let nevermind = db.entity(EntityId(3)).values;
-  assert_eq!(nevermind.len(), 1);
+  assert_eq!(nevermind.len(), 2);
   assert_eq!(nevermind.get(&tests::data::album_name), Some(&vec![Value::Str("Nevermind".into())]));
 }
 
