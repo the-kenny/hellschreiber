@@ -5,6 +5,8 @@ extern crate edn;
 
 pub mod sqlite;
 
+pub use sqlite::SqliteDb;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::borrow::{Borrow, Cow};
 use std::fmt;
@@ -49,11 +51,17 @@ pub enum Value {
   // TODO: Ref
 }
 
-// impl TxId {
-//   fn resolve<'a, D: Db>(self, db: &'a D) -> Entity<'a, D> {
-//     db.entity(self.0)
-//   }
-// }
+impl<'a> From<&'a str> for Value {
+  fn from(s: &'a str) -> Value { Value::Str(s.into()) }
+}
+
+impl From<String> for Value {
+  fn from(s: String) -> Value { Value::Str(s) }
+}
+
+impl From<i64> for Value {
+  fn from(i: i64) -> Value { Value::Int(i) }
+}
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub enum Status {
@@ -139,21 +147,23 @@ pub enum Operation {
 pub struct Assert;
 pub struct Retract;
 
-impl<'a> Into<Operation> for &'a (Assert, TempId, Attribute, Value) {
-  fn into(self) -> Operation {
-    Operation::TempidAssertion(self.1, self.2, self.3.clone())
+impl<'a, V: Into<Value> + Clone> From<&'a (Assert, TempId, Attribute, V)> for Operation {
+  fn from(o: &(Assert, TempId, Attribute, V)) -> Self {
+    Operation::TempidAssertion(o.1, o.2, o.3.clone().into())
   }
 }
 
-impl<'a> Into<Operation> for &'a (Assert, EntityId, Attribute, Value) {
-  fn into(self) -> Operation {
-    Operation::Assertion(self.1, self.2, self.3.clone())
+impl<'a, V> From<&'a (Assert, EntityId, Attribute, V)> for Operation 
+  where V: Into<Value> + Clone {
+  fn from(o: &'a (Assert, EntityId, Attribute, V)) -> Operation {
+    Operation::Assertion(o.1, o.2, o.3.clone().into())
   }
 }
 
-impl<'a> Into<Operation> for &'a (Retract, EntityId, Attribute, Value) {
-  fn into(self) -> Operation {
-    Operation::Retraction(self.1, self.2, self.3.clone())
+impl<'a, V> From<&'a (Retract, EntityId, Attribute, V)> for Operation 
+  where V: Into<Value> + Clone {
+  fn from(o: &'a (Retract, EntityId, Attribute, V)) -> Operation {
+    Operation::Retraction(o.1, o.2, o.3.clone().into())
   }
 }
 
@@ -405,24 +415,12 @@ mod tests {
   mod data;
   mod in_memory;
 
+  mod usage;
+
   #[macro_export]
   macro_rules! test_db_impl {
     ($name:ident, $t:expr) => {
       mod $name {
-        #[test]
-        fn test_entity() {
-          super::db::test_entity($t);
-        }
-
-        #[test]
-        fn test_seed_datoms() {
-          super::db::test_seed_datoms($t);
-        }
-
-        #[test]
-        fn test_datoms() {
-          super::db::test_datoms($t);
-        }
 
         #[test]
         #[allow(unused_parens)]
@@ -432,20 +430,15 @@ mod tests {
           super::db::test_db_equality(db1, db2);
         }
 
-        #[test]
-        fn test_db_self_equality() {
-          super::db::test_db_equality($t, $t);
-        }
+        #[test] fn test_entity() {super::db::test_entity($t);}
+        #[test] fn test_seed_datoms() {super::db::test_seed_datoms($t);}
+        #[test] fn test_datoms() {super::db::test_datoms($t);}
+        #[test] fn test_db_self_equality() {super::db::test_db_equality($t, $t);}
+        #[test] fn test_db_fn_attribute() {super::db::test_fn_attribute($t)}
+        #[test] fn test_db_metadata() { super::db::test_db_metadata($t) }
+        #[test] fn test_string_attributes() { super::db::test_string_attributes($t) }
 
-        #[test]
-        fn test_db_fn_attribute() {
-          super::db::test_fn_attribute($t)
-        }
-
-        #[test]
-        fn test_db_metadata() {
-          super::db::test_db_metadata($t)
-        }
+        #[test] fn test_usage_001() { super::usage::test_usage_001($t) }
       }
     }
   }

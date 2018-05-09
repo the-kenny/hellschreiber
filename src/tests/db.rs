@@ -199,3 +199,9 @@ pub fn test_db_metadata<D: Db>(db: D) {
   assert!(!db.entity(ident_eid).values.is_empty());
   assert!(!db.entity(doc_eid).values.is_empty());
 }
+
+pub fn test_string_attributes<D: Db>(mut db: D) {
+  unimplemented!()
+  // let tx = [(Assert, TempId(42), "db/ident", "xx")];
+  // db.transact(&tx);
+}
