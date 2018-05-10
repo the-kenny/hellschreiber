@@ -52,6 +52,32 @@ pub enum Value {
   // TODO: Ref
 }
 
+impl Value {
+  pub fn as_str<'a>(&'a self) -> Option<&'a str> {
+    if let &Value::Str(ref s) = self {
+      Some(&s[..])
+    } else {
+      None
+    }
+  }
+
+  pub fn as_int(&self) -> Option<i64> {
+    if let &Value::Int(i) = self {
+      Some(i)
+    } else {
+      None
+    }
+  }
+  
+  pub fn follow_ref<'a, D: Db>(&self, db: &'a D) -> Option<Entity<'a, D>> {
+    if let &Value::Ref(eid) = self {
+      Some(db.entity(eid))
+    } else {
+      None
+    }
+  }
+}
+
 impl<'a> From<&'a str> for Value {
   fn from(s: &'a str) -> Value { Value::Str(s.into()) }
 }
@@ -449,10 +475,9 @@ pub trait Db: Sized {
 
   fn attribute_name<'a>(&'a self, attribute: &Attribute) -> Option<String> {
     self.datoms(Index::Eavt, Components::ea(attribute.0, attr::ident))
-      .iter().next()
-      .map(|d| d.value.clone())
-      .and_then(|v| match v {
-        Value::Str(s) => Some(s.clone()),
+      .into_iter().next()
+      .and_then(|d| match d.value {
+        Value::Str(ref s) => Some(s.clone()),
         _ => None
       })
   }
