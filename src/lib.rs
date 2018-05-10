@@ -1,11 +1,12 @@
 #[cfg(test)] extern crate rand;
-extern crate rusqlite;
-extern crate edn;
+#[macro_use] extern crate derive_more;
 #[macro_use] extern crate lazy_static;
+#[macro_use] extern crate serde_derive;
+extern crate chrono;
+extern crate edn;
+extern crate rusqlite;
 extern crate serde;
 extern crate serde_json;
-#[macro_use] extern crate serde_derive;
-#[macro_use] extern crate derive_more;
 
 pub mod sqlite;
 pub use sqlite::SqliteDb;
@@ -49,6 +50,7 @@ pub enum Value {
   Str(String),
   Int(i64),
   Ref(EntityId),
+  DateTime(chrono::DateTime<chrono::Utc>)
   // TODO: Ref
 }
 
@@ -68,7 +70,7 @@ impl Value {
       None
     }
   }
-  
+
   pub fn follow_ref<'a, D: Db>(&self, db: &'a D) -> Option<Entity<'a, D>> {
     if let &Value::Ref(eid) = self {
       Some(db.entity(eid))
@@ -166,26 +168,31 @@ pub enum Operation {
 pub struct Assert;
 pub struct Retract;
 
-impl<'a, V: Into<Value> + Clone> From<&'a (Assert, TempId, Attribute, V)> for Operation {
-  fn from(o: &(Assert, TempId, Attribute, V)) -> Self {
-    Operation::TempidAssertion(o.1, o.2, o.3.clone().into())
+pub trait ToOperation {
+  fn to_operation<D: Db>(&self, db: &D) -> Operation;
+}
+
+impl<'a, V: Into<Value> + Clone, A: ToAttribute> ToOperation for &'a (Assert, TempId, A, V) {
+  fn to_operation<D: Db>(&self, db: &D) -> Operation {
+    let a = self.2.to_attribute(db)
+      .expect("Unknown attribute in transaction");
+    Operation::TempidAssertion(self.1, a, self.3.clone().into())
   }
 }
 
-impl<'a, V> From<&'a (Assert, EntityId, Attribute, V)> for Operation
+impl<'a, V> ToOperation for &'a (Assert, EntityId, Attribute, V)
   where V: Into<Value> + Clone {
-  fn from(o: &'a (Assert, EntityId, Attribute, V)) -> Operation {
-    Operation::Assertion(o.1, o.2, o.3.clone().into())
+  fn to_operation<D: Db>(&self, _db: &D) -> Operation {
+    Operation::Assertion(self.1, self.2, self.3.clone().into())
   }
 }
 
-impl<'a, V> From<&'a (Retract, EntityId, Attribute, V)> for Operation
+impl<'a, V> ToOperation for &'a (Retract, EntityId, Attribute, V)
   where V: Into<Value> + Clone {
-  fn from(o: &'a (Retract, EntityId, Attribute, V)) -> Operation {
-    Operation::Retraction(o.1, o.2, o.3.clone().into())
+  fn to_operation<D: Db>(&self, _db: &D) -> Operation {
+    Operation::Retraction(self.1, self.2, self.3.clone().into())
   }
 }
-
 
 #[allow(dead_code)]
 pub struct Entity<'a, D: Db + 'a> {
@@ -213,10 +220,10 @@ impl<'a, D: Db> ops::Index<&'a str> for Entity<'a, D> {
   fn index(&self, idx: &'a str) -> &Self::Output {
     if idx == "db/id" {
       unimplemented!("Value::Ref or Value::Eid")
-    } else if let Some(attr_id) = self.db.attribute(idx) {
-      &self.values[&attr_id]
     } else {
-      &EMPTY_VEC
+      self.db.attribute(idx)
+        .and_then(|attr_id| self.values.get(&attr_id))
+        .unwrap_or(&EMPTY_VEC)
     }
   }
 }
@@ -291,6 +298,7 @@ pub mod attr {
   pub const id:    Attribute = Attribute(EntityId(10));
   pub const ident: Attribute = Attribute(EntityId(11));
   pub const doc:   Attribute = Attribute(EntityId(12));
+  pub const tx_instant:   Attribute = Attribute(EntityId(13));
   // pub const valueType:   Attribute = Attribute(EntityId(12));
   // pub const cardinality: Attribute = Attribute(EntityId(13));
   // pub const unique:      Attribute = Attribute(EntityId(14));
@@ -323,28 +331,20 @@ fn seed_datoms() -> Datoms<'static> {
     status: Status::Added,
   };
 
-  let ident_doc = Datom {
-    entity: attr::ident.0,
-    attribute: attr::doc,
-    value: Value::Str("Unique identifier for an entity.".into()),
+  let tx_instant = Datom {
+    entity: attr::tx_instant.0,
+    attribute: attr::ident,
+    value: "db/tx_instant".into(),
     tx: EntityId(0),
-    status: Status::Added,
-  };
-
-  let doc_doc = Datom {
-    entity: attr::doc.0,
-    attribute: attr::doc,
-    value: Value::Str("Description of an attribute.".into()),
-    tx: EntityId(0),
-    status: Status::Added,
+    status: Status::Added
   };
 
   let datoms = vec![
     id,
     ident,
     doc,
-    ident_doc,
-    doc_doc];
+    tx_instant
+  ];
 
   Cow::Owned(datoms)
 }
@@ -353,6 +353,12 @@ fn seed_datoms() -> Datoms<'static> {
 pub struct TransactionData {
   pub tx_id: TxId,
   pub tempid_mappings: BTreeMap<TempId, EntityId>
+}
+
+use std::sync::atomic;
+
+lazy_static! {
+  static ref LATEST_TEMPID: atomic::AtomicIsize  = 100.into();
 }
 
 // TODO: Add `is_initialized?` and `initialize`
@@ -370,11 +376,28 @@ pub trait Db: Sized {
     EntityId(std::cmp::max(n, 1000))
   }
 
+  fn tempid(&mut self) -> TempId {
+    let i = LATEST_TEMPID.fetch_add(1, atomic::Ordering::SeqCst);
+    TempId(i as i64)
+  }
+
   // TODO: Return `Result<TransactionData, Error>`
-  fn transact<O: Into<Operation>, I: IntoIterator<Item=O>>(&mut self, tx: I) -> TransactionData {
+  fn transact<O: ToOperation, I: IntoIterator<Item=O>>(&mut self, tx: I) -> TransactionData {
     let tx_eid = self.highest_eid();
 
-    let tx: Vec<Operation> = tx.into_iter().map(|op| op.into()).collect();
+    let now = chrono::Utc::now();
+
+    let mut datoms = vec![Datom {
+      entity: tx_eid,
+      attribute: attr::tx_instant,
+      value: Value::DateTime(now),
+      tx: tx_eid,
+      status: Status::Added
+    }];
+
+    let tx: Vec<Operation> = tx.into_iter().map(|op| op.to_operation(self)).collect();
+
+    datoms.reserve(tx.len());
 
     let eids = {
       let mut eids = BTreeMap::new();
@@ -391,28 +414,31 @@ pub trait Db: Sized {
       eids
     };
 
-    let mut datoms = tx.into_iter()
-      .map(|operation| {
-        let (e, a, v, status) = match operation.into() {
-          Operation::Assertion(eid, a, v)       => (eid,        a, v, Status::Added),
-          Operation::Retraction(eid, a, v)      => (eid,        a, v, Status::Retracted(tx_eid)),
-          Operation::TempidAssertion(tid, a, v) => (eids[&tid], a, v, Status::Added)
-        };
+    {
+      let data_datoms = tx.into_iter()
+        .map(|operation| {
+          let (e, a, v, status) = match operation.into() {
+            Operation::Assertion(eid, a, v)       => (eid,        a, v, Status::Added),
+            Operation::Retraction(eid, a, v)      => (eid,        a, v, Status::Retracted(tx_eid)),
+            Operation::TempidAssertion(tid, a, v) => (eids[&tid], a, v, Status::Added)
+          };
 
-        if !self.attribute_name(&a).is_some() {
-          panic!("Attribute {:?} has no db/ident (trying to assert/retract fact {:?})", a, (e, a, v, status))
-        }
+          if !self.attribute_name(&a).is_some() {
+            panic!("Attribute {:?} has no db/ident (trying to assert/retract fact {:?})", a, (e, a, v, status))
+          }
 
-        Datom {
-          entity: e,
-          attribute: a,
-          value: v.clone(),
-          tx: tx_eid,
-          status: status
-        }
-      }).collect::<Vec<Datom>>();
+          Datom {
+            entity: e,
+            attribute: a,
+            value: v.clone(),
 
-    // TODO: Insert transaction itself (with date etc.)
+            tx: tx_eid,
+            status: status
+          }
+        });
+
+      datoms.extend(data_datoms);
+    }
 
     self.store_datoms(&datoms);
 
@@ -465,6 +491,10 @@ pub trait Db: Sized {
   }
 
   fn store_datoms(&mut self, _datoms: &[Datom]);
+
+  fn has_attribute(&self, attribute_name: &str) -> bool {
+    self.attribute(attribute_name).is_some()
+  }
 
   fn attribute(&self, attribute_name: &str) -> Option<Attribute> {
     // TODO: Use VAET

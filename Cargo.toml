@@ -4,6 +4,7 @@ name = "ratomic"
 version = "0.1.0"
 
 [dependencies]
+chrono = { version = "0.4.2", features = ["serde"] }
 derive_more = "0.10.0"
 edn = "0.3.0"
 lazy_static = "1.0.0"

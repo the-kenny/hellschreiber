@@ -204,9 +204,8 @@ pub fn test_db_metadata<D: Db>(db: D) {
 }
 
 pub fn test_string_attributes<D: Db>(mut db: D) {
-  // unimplemented!()
-  // let tx = [(Assert, TempId(42), "db/ident", "xx")];
-  // db.transact(&tx);
+  let tx = [(Assert, db.tempid(), "db/ident", "xx")];
+  db.transact(&tx);
 }
 
 pub fn test_transact_panics_for_unknown_attributes<D: Db>(mut db: D) {
@@ -216,7 +215,13 @@ pub fn test_transact_panics_for_unknown_attributes<D: Db>(mut db: D) {
 
 pub fn test_entity_index_trait<D: Db>(db: D) {
   let entity = db.entity(attr::ident.0);
-  assert_eq!(false, entity["db/doc"].is_empty());
   assert_eq!(false, entity["db/ident"].is_empty());
   assert_eq!(true,  entity["unknown/attribute"].is_empty());
 }
+
+/*
+pub fn test_ref_follow<D: Db>(db: D) {
+  let entity = db.entity(attr::ident.0);
+
+}
+*/
