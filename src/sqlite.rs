@@ -1,4 +1,5 @@
 extern crate rusqlite;
+extern crate serde_json;
 
 use super::*;
 
@@ -286,6 +287,27 @@ mod type_impls {
 
   impl types::FromSql for Value {
     fn column_result(value: ValueRef) -> FromSqlResult<Self> {
+      if let ValueRef::Text(json) = value {
+        // ValueRef::Text(t)    => Ok(Value::Str(t.into())),
+        serde_json::from_str(json)
+          .map_err(|err| types::FromSqlError::Other(Box::new(err)))
+      } else {
+        Err(types::FromSqlError::InvalidType)
+      }
+    }
+  }
+
+  impl types::ToSql for Value {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
+      let json = serde_json::to_string(self).unwrap();
+      Ok(ToSqlOutput::Owned(types::Value::Text(json)))
+    }
+  }
+
+  
+  /*
+  impl types::FromSql for Value {
+    fn column_result(value: ValueRef) -> FromSqlResult<Self> {
       match value {
         ValueRef::Text(t)    => Ok(Value::Str(t.into())),
         ValueRef::Integer(i) => Ok(Value::Int(i)),
@@ -298,10 +320,12 @@ mod type_impls {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
       match self {
         &Value::Str(ref s) => Ok(ToSqlOutput::Borrowed(ValueRef::Text(s))),
-        &Value::Int(i)     => Ok(ToSqlOutput::Owned(types::Value::Integer(i)))
+        &Value::Int(i)     => Ok(ToSqlOutput::Owned(types::Value::Integer(i))),
+        &Value::Ref(eid)   => Ok(ToSqlOutput::Owned(types::Value::Integer(eid.0))),
       }
     }
   }
+   */
 
   impl types::FromSql for EntityId {
     fn column_result(value: types::ValueRef) -> FromSqlResult<Self> {

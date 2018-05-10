@@ -2,6 +2,10 @@
 extern crate rusqlite;
 extern crate edn;
 #[macro_use] extern crate lazy_static;
+extern crate serde;
+extern crate serde_json;
+#[macro_use] extern crate serde_derive;
+#[macro_use] extern crate derive_more;
 
 pub mod sqlite;
 pub use sqlite::SqliteDb;
@@ -10,13 +14,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::borrow::{Borrow, Cow};
 use std::{fmt, ops};
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EntityId(i64);
 
 pub type TxId = EntityId;
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
-pub struct Ref(EntityId);
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub struct Attribute(EntityId);
@@ -43,23 +44,16 @@ impl<'a> ToAttribute for &'a str {
   }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Serialize, Deserialize, From)]
 pub enum Value {
   Str(String),
   Int(i64),
+  Ref(EntityId),
   // TODO: Ref
 }
 
 impl<'a> From<&'a str> for Value {
   fn from(s: &'a str) -> Value { Value::Str(s.into()) }
-}
-
-impl From<String> for Value {
-  fn from(s: String) -> Value { Value::Str(s) }
-}
-
-impl From<i64> for Value {
-  fn from(i: i64) -> Value { Value::Int(i) }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
@@ -371,7 +365,7 @@ pub trait Db: Sized {
       eids
     };
 
-    let datoms = tx.into_iter()
+    let mut datoms = tx.into_iter()
       .map(|operation| {
         let (e, a, v, status) = match operation.into() {
           Operation::Assertion(eid, a, v)       => (eid,        a, v, Status::Added),
@@ -391,6 +385,8 @@ pub trait Db: Sized {
           status: status
         }
       }).collect::<Vec<Datom>>();
+
+    // TODO: Insert transaction itself (with date etc.)
 
     self.store_datoms(&datoms);
 
