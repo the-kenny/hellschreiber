@@ -96,8 +96,8 @@ impl Db for TestDb {
       }
 
       match index {
-        Index::Eavt(_, _, _, _) => cmp!(entity, tx, attribute, value),
-        Index::Aevt(_, _, _, _) => cmp!(attribute, tx, entity, value),
+        Index::Eavt(_, _, _, _) => cmp!(entity, attribute, value, tx),
+        Index::Aevt(_, _, _, _) => cmp!(attribute, entity, value, tx),
       }
     });
 

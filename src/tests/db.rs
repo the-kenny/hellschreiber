@@ -229,6 +229,13 @@ pub fn test_string_attributes<D: Db>(mut db: D) {
   db.transact(&tx);
 }
 
+pub fn test_highest_eid<D: Db>(mut db: D) {
+  assert_eq!(db.highest_eid(), EntityId(1000));
+
+  db.transact(&[(Assert, TempId(42), attr::ident, "foo/bar")]);
+  assert_eq!(db.highest_eid(), EntityId(1001));
+}
+
 pub fn test_transact_panics_for_unknown_attributes<D: Db>(mut db: D) {
   let tx = [(Assert, TempId(42), Attribute(db.highest_eid()), "xx")];
   db.transact(&tx);

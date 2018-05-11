@@ -403,7 +403,7 @@ pub trait Db: Sized {
   #[cfg(test)]
   fn all_datoms<'a>(&'a self) -> Datoms<'a>;
 
-  fn highest_eid(&mut self) -> EntityId {
+  fn highest_eid(&self) -> EntityId {
     // TODO: Use Index's impl
     let n = self.datoms(Index::Eavt(None, None, None, None))
       .into_iter()
@@ -581,6 +581,7 @@ mod tests {
         #[test] fn test_fn_attribute() {super::db::test_fn_attribute($t)}
         #[test] fn test_metadata() { super::db::test_db_metadata($t) }
         #[test] fn test_string_attributes() { super::db::test_string_attributes($t) }
+        #[test] fn test_highest_eid() { super::db::test_highest_eid($t) }
 
         #[test]
         #[should_panic]

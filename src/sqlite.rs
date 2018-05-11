@@ -58,45 +58,6 @@ impl SqliteDb {
       status: row.get(4),
     }
   }
-
-  fn attribute_values(&self,
-                      entity: EntityId,
-                      attribute: Attribute)
-                      -> Vec<(EntityId, Attribute, Value, EntityId)> {
-    let mut value_query = self.conn.prepare(
-      "select v, t
-       from datoms
-       where e = ?1 and a = ?2 and retracted_tx is null
-       order by t asc"
-    ).unwrap();
-
-    let rows = value_query.query_map(&[&entity.0, &(attribute.0).0], |row| {
-      let v: Value = row.get(0);
-      let t: EntityId = row.get(1);
-
-      (entity, attribute, v, t)
-    }).unwrap().map(|x| x.unwrap());
-
-    rows.collect()
-  }
-
-  fn sort_datoms(datoms: &mut Vec<Datom>, index: Index) {
-    // TODO: Get rid of this sort-by step
-    datoms.sort_by(|l,r| {
-      use std::cmp::Ordering;
-      macro_rules! cmp {
-        ($i:ident) => (l.$i.cmp(&r.$i));
-        ($($i:ident),*) => {
-          [$(cmp!($i)),*].into_iter().fold(Ordering::Equal, |o, x| o.then(*x))
-        };
-      }
-
-      match index {
-        Index::Eavt(_, _, _, _) => cmp!(entity, tx, attribute, value),
-        Index::Aevt(_, _, _, _) => cmp!(attribute, entity, value, tx),
-      }
-    });
-  }
 }
 
 
@@ -148,6 +109,13 @@ impl Db for SqliteDb {
     Cow::Owned(datoms)
   }
 
+  fn highest_eid(&self) -> EntityId {
+    let n = self.conn.query_row("select max(e) from datoms", &[], |row| row.get(0))
+      .unwrap_or(0);
+
+    EntityId(std::cmp::max(n, 1000))
+  }
+
   // fn transact<T: Into<Fact>>(&mut self, _tx: &[T]) -> TxId {
   //   // Note: This storage uses a special behavior for transactions: If
   //   // a datom is retracted, we just set the `retracted_tx` in sqlite.
@@ -161,16 +129,21 @@ impl Db for SqliteDb {
 
   fn datoms<'a>(&'a self, index: Index) -> Datoms {
     let (e, a, v, t) = index.unwrap();
+    
+    let order_statement = match index {
+      Index::Eavt(_, _, _, _) => "e, a, v, t asc",
+      Index::Aevt(_, _, _, _) => "a, e, v, t asc",
+    };
 
-    let mut query = self.conn.prepare(
-      "select distinct e, a
+    let mut query = self.conn.prepare(&format!(
+      "select distinct e, a, v, t
        from datoms
-       where case when ?1 NOTNULL then e == ?1 else 1 end
-         and case when ?2 NOTNULL then a == ?2 else 1 end
-         and case when ?3 NOTNULL then v == ?3 else 1 end
-         and case when ?4 NOTNULL then t == ?4 else 1 end
-       order by t asc").unwrap();
-
+       where retracted_tx is null
+         and case when ?1 notnull then e == ?1 else 1 end
+         and case when ?2 notnull then a == ?2 else 1 end
+         and case when ?3 notnull then v == ?3 else 1 end
+         and case when ?4 notnull then t == ?4 else 1 end
+       order by {}", order_statement)).unwrap();
 
     let entity_query_input = match e {
       Some(EntityId(i)) => rusqlite::types::Value::Integer(i),
@@ -190,15 +163,20 @@ impl Db for SqliteDb {
 
     let tx_query_input = match t {
       Some(EntityId(i)) => rusqlite::types::Value::Integer(i),
-      None                    => rusqlite::types::Value::Null,
+      None              => rusqlite::types::Value::Null,
     };
 
-    let mut datoms = query.query_map(&[&entity_query_input, &attribute_query_input, &value_query_input, &tx_query_input], |row| {
+    let datoms = query.query_map(&[&entity_query_input,
+                                       &attribute_query_input,
+                                       &value_query_input,
+                                       &tx_query_input], |row| {
       let e = EntityId(row.get(0));
       let a = Attribute::new(EntityId(row.get(1)));
-      (e,a)
+      let v: Value = row.get(2);
+      let t: TxId = row.get(3);
+      (e, a, v, t)
     }).unwrap().map(|r| r.unwrap())
-      .flat_map(|(e, a)| self.attribute_values(e, a))
+      // .flat_map(|(e, a)| self.attribute_values(e, a))
       .map(|(e, a, v, tx)| Datom {
         entity: e,
         attribute: a,
@@ -207,9 +185,6 @@ impl Db for SqliteDb {
         status: Status::Added,
       })
       .collect::<Vec<_>>();
-
-    // TODO: Get rid of this step
-    Self::sort_datoms(&mut datoms, index);
 
     Cow::Owned(datoms)
   }
