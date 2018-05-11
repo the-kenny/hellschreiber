@@ -12,7 +12,7 @@ pub mod sqlite;
 pub use sqlite::SqliteDb;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::borrow::{Borrow, Cow};
+use std::borrow::Cow;
 use std::{fmt, ops};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Serialize, Deserialize)]
@@ -215,6 +215,20 @@ lazy_static! {
   static ref EMPTY_VEC: Vec<Value> = vec![];
 }
 
+impl<'a, D: Db> ops::Index<&'a str> for &'a Entity<'a, D> {
+  type Output = Vec<Value>;
+  fn index(&self, idx: &'a str) -> &Self::Output {
+    if idx == "db/id" {
+      unimplemented!("Value::Ref or Value::Eid")
+    } else {
+      self.db.attribute(idx)
+        .and_then(|attr_id| self.values.get(&attr_id))
+        .unwrap_or(&EMPTY_VEC)
+    }
+  }
+}
+
+// TODO: Get rid of duplication
 impl<'a, D: Db> ops::Index<&'a str> for Entity<'a, D> {
   type Output = Vec<Value>;
   fn index(&self, idx: &'a str) -> &Self::Output {
@@ -228,14 +242,37 @@ impl<'a, D: Db> ops::Index<&'a str> for Entity<'a, D> {
   }
 }
 
+
 pub type Datoms<'a> = Cow<'a, [Datom]>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Index {
-  Eavt,
-  // Avet,
-  // Aevt,
+  Eavt(Option<EntityId>, Option<Attribute>, Option<Value>, Option<TxId>),
+  Aevt(Option<Attribute>, Option<EntityId>, Option<Value>, Option<TxId>),
   // Vaet,
+}
+
+impl Index {
+  pub fn matches(&self, datom: &Datom) -> bool {
+    let (e, a, ref v, t) = match self {
+      &Index::Eavt(e, a, ref v, t) => (e, a, v, t),
+      &Index::Aevt(a, e, ref v, t) => (e, a, v, t),
+    };
+
+    let e = e.is_none() || e.unwrap() == datom.entity;
+    let a = a.is_none() || a.unwrap() == datom.attribute;
+    let v = v.is_none() || v.as_ref().unwrap() == &datom.value;
+    let t = t.is_none() || t.unwrap() == datom.tx;
+
+    return e && a && v && t;;
+  }
+
+  fn unwrap<'a>(&'a self) -> (Option<EntityId>, Option<Attribute>, Option<Value>, Option<TxId>) {
+    match self.clone() {
+      Index::Eavt(e, a, v, t) => (e, a, v, t),
+      Index::Aevt(a, e, v, t) => (e, a, v, t),
+    }
+  }
 }
 
 // TODO: AVET, AEVT, VAET
@@ -245,7 +282,7 @@ pub enum Index {
 // out whom John follows (“John” :follows ?x), but also efficiently
 // lookup who follows John (?x :follows “John”).
 
-// AEVT allows efficient access to all entities with a given attribute5
+// AEVT allows efficient access to all entities with a given attribute
 
 // AVET provides efficient lookup by value and stores datoms with
 // attributes marked as unique or index in schema. Attributes of this
@@ -253,44 +290,44 @@ pub enum Index {
 // in practice, and it’s better if you can manage to put monotonic
 // values in it, or use it sparingly.
 
-#[derive(Debug)]
-pub struct Components(Option<EntityId>,
-                      Option<Attribute>,
-                      Option<Value>,
-                      Option<TxId>);
+// #[derive(Debug)]
+// pub struct Components(Option<EntityId>,
+//                       Option<Attribute>,
+//                       Option<Value>,
+//                       Option<TxId>);
 
-impl Components {
-  pub fn empty() -> Self {
-    Components(None, None, None, None)
-  }
+// impl Components {
+//   pub fn empty() -> Self {
+//     Components(None, None, None, None)
+//   }
 
-  pub fn e(e: EntityId) -> Self {
-    Components(Some(e), None, None, None)
-  }
+//   pub fn e(e: EntityId) -> Self {
+//     Components(Some(e), None, None, None)
+//   }
 
-  pub fn ea(e: EntityId, a: Attribute) -> Self {
-    Components(Some(e), Some(a), None, None)
-  }
+//   pub fn ea(e: EntityId, a: Attribute) -> Self {
+//     Components(Some(e), Some(a), None, None)
+//   }
 
-  pub fn eav(e: EntityId, a: Attribute, v: Value) -> Self {
-    Components(Some(e), Some(a), Some(v), None)
-  }
+//   pub fn eav(e: EntityId, a: Attribute, v: Value) -> Self {
+//     Components(Some(e), Some(a), Some(v), None)
+//   }
 
-  pub fn eavt(e: EntityId, a: Attribute, v: Value, t: TxId) -> Self {
-    Components(Some(e), Some(a), Some(v), Some(t))
-  }
+//   pub fn eavt(e: EntityId, a: Attribute, v: Value, t: TxId) -> Self {
+//     Components(Some(e), Some(a), Some(v), Some(t))
+//   }
 
-  pub fn matches(&self, datom: &Datom) -> bool {
-    let &Components(e, a, ref v, t) = self;
+//   pub fn matches(&self, datom: &Datom) -> bool {
+//     let &Components(e, a, ref v, t) = self;
 
-    let e = e.is_none() || e.unwrap() == datom.entity;
-    let a = a.is_none() || a.unwrap() == datom.attribute;
-    let v = v.is_none() || v.as_ref().unwrap() == &datom.value;
-    let t = t.is_none() || t.unwrap() == datom.tx;
+//     let e = e.is_none() || e.unwrap() == datom.entity;
+//     let a = a.is_none() || a.unwrap() == datom.attribute;
+//     let v = v.is_none() || v.as_ref().unwrap() == &datom.value;
+//     let t = t.is_none() || t.unwrap() == datom.tx;
 
-    return e && a && v && t;;
-  }
-}
+//     return e && a && v && t;;
+//   }
+// }
 
 pub mod attr {
   #![allow(non_upper_case_globals)]
@@ -367,7 +404,8 @@ pub trait Db: Sized {
   fn all_datoms<'a>(&'a self) -> Datoms<'a>;
 
   fn highest_eid(&mut self) -> EntityId {
-    let n = self.datoms(Index::Eavt, Components::empty())
+    // TODO: Use Index's impl
+    let n = self.datoms(Index::Eavt(None, None, None, None))
       .into_iter()
       .last()
       .map(|datom| datom.entity.0)
@@ -448,13 +486,13 @@ pub trait Db: Sized {
     }
   }
 
-  fn datoms<'a, C: Borrow<Components>>(&'a self, index: Index, components: C) -> Datoms<'a>;
+  fn datoms<'a>(&'a self, index: Index) -> Datoms<'a>;
 
   fn entity<'a>(&'a self, entity: EntityId) -> Entity<'a, Self> {
-    let datoms = self.datoms(Index::Eavt, Components::empty());
+    let datoms = self.datoms(Index::Eavt(Some(entity), None, None, None));
     let mut attrs: BTreeMap<Attribute, BTreeSet<&Datom>> = BTreeMap::new();
 
-    for d in datoms.into_iter().filter(|d| d.entity == entity) {
+    for d in datoms.into_iter() {
       let entry = attrs.entry(d.attribute)
         .or_insert_with(|| BTreeSet::new());
 
@@ -498,13 +536,13 @@ pub trait Db: Sized {
 
   fn attribute(&self, attribute_name: &str) -> Option<Attribute> {
     // TODO: Use VAET
-    self.datoms(Index::Eavt, Components(None, Some(attr::ident), Some(Value::Str(attribute_name.into())), None))
+    self.datoms(Index::Eavt(None, Some(attr::ident), Some(Value::Str(attribute_name.into())), None))
       .iter().next()
       .map(|d| Attribute::new(d.entity))
   }
 
   fn attribute_name<'a>(&'a self, attribute: &Attribute) -> Option<String> {
-    self.datoms(Index::Eavt, Components::ea(attribute.0, attr::ident))
+    self.datoms(Index::Eavt(Some(attribute.0), Some(attr::ident), None, None))
       .into_iter().next()
       .and_then(|d| match d.value {
         Value::Str(ref s) => Some(s.clone()),
@@ -537,7 +575,8 @@ mod tests {
 
         #[test] fn test_entity() {super::db::test_entity($t);}
         #[test] fn test_seed_datoms() {super::db::test_seed_datoms($t);}
-        #[test] fn test_datoms() {super::db::test_datoms($t);}
+        #[test] fn test_eavt_datoms() {super::db::test_eavt_datoms($t);}
+        #[test] fn test_aevt_datoms() {super::db::test_aevt_datoms($t);}
         #[test] fn test_self_equality() {super::db::test_db_equality($t, $t);}
         #[test] fn test_fn_attribute() {super::db::test_fn_attribute($t)}
         #[test] fn test_metadata() { super::db::test_db_metadata($t) }

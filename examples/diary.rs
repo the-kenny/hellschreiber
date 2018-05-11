@@ -12,6 +12,13 @@ fn main() {
     store_schema(&mut db);
   }
 
+  let text_attribute = db.attribute("diary.entry/text").unwrap();
+
+  for datom in db.datoms(Index::Aevt(Some(text_attribute), None, None, None)).iter() {
+    let entry = db.entity(datom.entity);
+    println!("{:?}: {:?}", entry["diary.entry/date"][0], entry["diary.entry/text"]);
+  }
+
   for line in BufReader::new(std::io::stdin()).lines() {
     let line = line.unwrap();
 

@@ -9,6 +9,7 @@ in rec {
     buildInputs = with pkgs; [
       sqlite
       pkgconfig
+      linuxPackages.perf
     ];
 
     # RUST_BACKTRACE="1";

@@ -31,9 +31,9 @@ impl Db for TestDb {
     Cow::Owned(datoms)
   }
 
-  fn datoms<'a, C: Borrow<Components>>(&'a self, index: Index, components: C) -> Datoms {
+  fn datoms(&self, index: Index) -> Datoms {
     let mut raw_datoms = self.0.clone();
-    raw_datoms.retain(|d| components.borrow().matches(&d));
+    raw_datoms.retain(|d| index.matches(&d));
     raw_datoms.sort_by_key(|d| d.tx);
 
     #[derive(Debug)]
@@ -96,7 +96,8 @@ impl Db for TestDb {
       }
 
       match index {
-        Index::Eavt => cmp!(entity, tx, attribute, value),
+        Index::Eavt(_, _, _, _) => cmp!(entity, tx, attribute, value),
+        Index::Aevt(_, _, _, _) => cmp!(attribute, tx, entity, value),
       }
     });
 
