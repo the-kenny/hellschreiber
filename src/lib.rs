@@ -391,12 +391,10 @@ pub struct TransactionData {
   pub tempid_mappings: BTreeMap<TempId, EntityId>
 }
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Fail, PartialEq, Eq)]
 pub enum TransactionError {
-  #[fail(display = "Sqlite Error {}", error)]
-  SqliteError {
-    error: rusqlite::Error
-  }
+  #[fail(display = "Tried to transact fact for attribute {:?} without db/ident", _0)]
+  NonIdentAttributeTransacted(Attribute),
 }
 
 lazy_static! {
@@ -456,30 +454,27 @@ pub trait Db: Sized {
       eids
     };
 
-    {
-      let data_datoms = tx.into_iter()
-        .map(|operation| {
-          let (e, a, v, status) = match operation.into() {
-            Operation::Assertion(eid, a, v)       => (eid,        a, v, Status::Added),
-            Operation::Retraction(eid, a, v)      => (eid,        a, v, Status::Retracted(tx_eid)),
-            Operation::TempidAssertion(tid, a, v) => (eids[&tid], a, v, Status::Added)
-          };
+    for operation in tx {
+      let (e, a, v, status) = match operation.into() {
+        Operation::Assertion(eid, a, v)       => (eid,        a, v, Status::Added),
+        Operation::Retraction(eid, a, v)      => (eid,        a, v, Status::Retracted(tx_eid)),
+        Operation::TempidAssertion(tid, a, v) => (eids[&tid], a, v, Status::Added)
+      };
 
-          if !self.attribute_name(&a).is_some() {
-            panic!("Attribute {:?} has no db/ident (trying to assert/retract fact {:?})", a, (e, a, v, status))
-          }
+      if !self.attribute_name(&a).is_some() {
+        return Err(TransactionError::NonIdentAttributeTransacted(a).into())
+      }
 
-          Datom {
-            entity: e,
-            attribute: a,
-            value: v.clone(),
+      let datom = Datom {
+        entity: e,
+        attribute: a,
+        value: v.clone(),
 
-            tx: tx_eid,
-            status: status
-          }
-        });
+        tx: tx_eid,
+        status: status
+      };
 
-      datoms.extend(data_datoms);
+      datoms.push(datom);
     }
 
     self.store_datoms(&datoms)?;
@@ -588,12 +583,9 @@ mod tests {
         #[test] fn test_metadata() { super::db::test_db_metadata($t) }
         #[test] fn test_string_attributes() { super::db::test_string_attributes($t) }
         #[test] fn test_highest_eid() { super::db::test_highest_eid($t) }
+        #[test] fn test_transact_unknown_attribute_error() { super::db::test_transact_unknown_attribute_error($t) }
 
-        #[test]
-        #[should_panic]
-        fn test_transact_panics_for_unknown_attributes() { super::db::test_transact_panics_for_unknown_attributes($t) }
-        #[test]
-        fn test_entity_index_trait() { super::db::test_entity_index_trait($t) }
+        #[test] fn test_entity_index_trait() { super::db::test_entity_index_trait($t) }
 
         #[test] fn test_usage_001() { super::usage::test_usage_001($t) }
       }

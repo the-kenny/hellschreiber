@@ -174,7 +174,7 @@ pub fn test_aevt_datoms<D: Db>(mut db: D) {
 
   let karl = db.tempid();
   let heinz = db.tempid();
-  
+
   let data_tx = &[(Assert, karl, "person/name", Value::Str("Karl".into())),
                   (Assert, karl, "person/age", 42.into()),
                   (Assert, heinz, "person/name", "Heinz".into())];
@@ -236,9 +236,14 @@ pub fn test_highest_eid<D: Db>(mut db: D) {
   assert_eq!(db.highest_eid(), EntityId(1001));
 }
 
-pub fn test_transact_panics_for_unknown_attributes<D: Db>(mut db: D) {
-  let tx = [(Assert, TempId(42), Attribute(db.highest_eid()), "xx")];
-  db.transact(&tx).unwrap();
+pub fn test_transact_unknown_attribute_error<D: Db>(mut db: D) {
+  let a = Attribute(db.highest_eid());
+  let tx = [(Assert, TempId(42), a, "xx")];
+
+  let error = db.transact(&tx).unwrap_err();
+
+  let transaction_error = error.downcast::<TransactionError>().unwrap();
+  assert_eq!(TransactionError::NonIdentAttributeTransacted(a), transaction_error);
 }
 
 pub fn test_entity_index_trait<D: Db>(db: D) {
