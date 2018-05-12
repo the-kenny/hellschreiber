@@ -4,15 +4,19 @@ name = "ratomic"
 version = "0.1.0"
 
 [dependencies]
-chrono = { version = "0.4.2", features = ["serde"] }
 derive_more = "0.10.0"
 edn = "0.3.0"
+failure = "0.1.1"
 lazy_static = "1.0.0"
 log = "*"
 rusqlite = "0.12.0"
 serde = "1.0.51"
 serde_derive = "1.0.51"
 serde_json = "1.0.17"
+
+[dependencies.chrono]
+features = ["serde"]
+version = "0.4.2"
 
 [dev-dependencies]
 rand = "0.3"

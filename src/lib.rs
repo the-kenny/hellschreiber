@@ -7,13 +7,16 @@ extern crate edn;
 extern crate rusqlite;
 extern crate serde;
 extern crate serde_json;
+#[macro_use] extern crate failure;
 
 pub mod sqlite;
 pub use sqlite::SqliteDb;
 
+use failure::Error;
 use std::collections::{BTreeMap, BTreeSet};
 use std::borrow::Cow;
 use std::{fmt, ops};
+use std::sync::atomic;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EntityId(i64);
@@ -73,7 +76,7 @@ impl Value {
 
   pub fn follow_ref<'a, D: Db>(&self, db: &'a D) -> Option<Entity<'a, D>> {
     if let &Value::Ref(eid) = self {
-      Some(db.entity(eid))
+      Some(db.entity(eid).unwrap()) // TODO
     } else {
       None
     }
@@ -388,7 +391,13 @@ pub struct TransactionData {
   pub tempid_mappings: BTreeMap<TempId, EntityId>
 }
 
-use std::sync::atomic;
+#[derive(Debug, Fail)]
+pub enum TransactionError {
+  #[fail(display = "Sqlite Error {}", error)]
+  SqliteError {
+    error: rusqlite::Error
+  }
+}
 
 lazy_static! {
   static ref LATEST_TEMPID: atomic::AtomicIsize  = 100.into();
@@ -401,7 +410,7 @@ pub trait Db: Sized {
 
   fn highest_eid(&self) -> EntityId {
     // TODO: Use Index's impl
-    let n = self.datoms(Index::Eavt(None, None, None, None))
+    let n = self.datoms(Index::Eavt(None, None, None, None)).unwrap() // TODO
       .into_iter()
       .last()
       .map(|datom| datom.entity.0)
@@ -415,8 +424,7 @@ pub trait Db: Sized {
     TempId(i as i64)
   }
 
-  // TODO: Return `Result<TransactionData, Error>`
-  fn transact<O: ToOperation, I: IntoIterator<Item=O>>(&mut self, tx: I) -> TransactionData {
+  fn transact<O: ToOperation, I: IntoIterator<Item=O>>(&mut self, tx: I) -> Result<TransactionData, Error> {
     let tx_eid = self.highest_eid();
 
     let now = chrono::Utc::now();
@@ -474,21 +482,21 @@ pub trait Db: Sized {
       datoms.extend(data_datoms);
     }
 
-    self.store_datoms(&datoms);
+    self.store_datoms(&datoms)?;
 
-    TransactionData {
+    Ok(TransactionData {
       tx_id: tx_eid,
-        tempid_mappings: eids,
-    }
+      tempid_mappings: eids,
+    })
   }
 
-  fn datoms<'a>(&'a self, index: Index) -> Datoms<'a>;
+  fn datoms<'a>(&'a self, index: Index) -> Result<Datoms<'a>, Error>;
 
-  fn entity<'a>(&'a self, entity: EntityId) -> Entity<'a, Self> {
-    let datoms = self.datoms(Index::Eavt(Some(entity), None, None, None));
+  fn entity<'a>(&'a self, entity: EntityId) -> Result<Entity<'a, Self>, Error> {
+    let datoms = self.datoms(Index::Eavt(Some(entity), None, None, None))?;
     let mut attrs: BTreeMap<Attribute, BTreeSet<&Datom>> = BTreeMap::new();
 
-    for d in datoms.into_iter() {
+    for d in datoms.iter() {
       let entry = attrs.entry(d.attribute)
         .or_insert_with(|| BTreeSet::new());
 
@@ -517,14 +525,16 @@ pub trait Db: Sized {
 
     values.insert(attr::id, vec![Value::Int(entity.0)]);
 
-    Entity {
+    let entity = Entity {
       db: self,
       eid: entity,
       values: values,
-    }
+    };
+
+    Ok(entity)
   }
 
-  fn store_datoms(&mut self, _datoms: &[Datom]);
+  fn store_datoms(&mut self, _datoms: &[Datom]) -> Result<(), Error>;
 
   fn has_attribute(&self, attribute_name: &str) -> bool {
     self.attribute(attribute_name).is_some()
@@ -532,13 +542,13 @@ pub trait Db: Sized {
 
   fn attribute(&self, attribute_name: &str) -> Option<Attribute> {
     // TODO: Use VAET
-    self.datoms(Index::Eavt(None, Some(attr::ident), Some(Value::Str(attribute_name.into())), None))
+    self.datoms(Index::Eavt(None, Some(attr::ident), Some(Value::Str(attribute_name.into())), None)).unwrap() // TODO
       .iter().next()
       .map(|d| Attribute::new(d.entity))
   }
 
   fn attribute_name<'a>(&'a self, attribute: &Attribute) -> Option<String> {
-    self.datoms(Index::Eavt(Some(attribute.0), Some(attr::ident), None, None))
+    self.datoms(Index::Eavt(Some(attribute.0), Some(attr::ident), None, None)).unwrap() // TODO
       .into_iter().next()
       .and_then(|d| match d.value {
         Value::Str(ref s) => Some(s.clone()),
@@ -590,6 +600,6 @@ mod tests {
     }
   }
 
-  test_db_impl!(sqlite_db,    ::sqlite::SqliteDb::new());
+  test_db_impl!(sqlite_db,    ::sqlite::SqliteDb::new().unwrap());
   test_db_impl!(in_memory_db, ::tests::in_memory::TestDb::new());
 }

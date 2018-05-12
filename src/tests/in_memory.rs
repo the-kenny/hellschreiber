@@ -6,14 +6,15 @@ pub struct TestDb(Vec<Datom>);
 impl TestDb {
   pub fn new() -> Self {
     let mut db = TestDb(vec![]);
-    db.store_datoms(&seed_datoms());
+    db.store_datoms(&seed_datoms()).unwrap();
     db
   }
 }
 
 impl Db for TestDb {
-  fn store_datoms(&mut self, datoms: &[Datom]) {
+  fn store_datoms(&mut self, datoms: &[Datom]) -> Result<(), Error> {
     self.0.extend_from_slice(datoms);
+    Ok(())
   }
 
   // fn transact(&mut self, facts: &[Fact]) -> TxId {
@@ -31,7 +32,7 @@ impl Db for TestDb {
     Cow::Owned(datoms)
   }
 
-  fn datoms(&self, index: Index) -> Datoms {
+  fn datoms(&self, index: Index) -> Result<Datoms, Error> {
     let mut raw_datoms = self.0.clone();
     raw_datoms.retain(|d| index.matches(&d));
     raw_datoms.sort_by_key(|d| d.tx);
@@ -101,6 +102,6 @@ impl Db for TestDb {
       }
     });
 
-    Cow::Owned(datoms)
+    Ok(Cow::Owned(datoms))
   }
 }

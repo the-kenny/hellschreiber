@@ -14,8 +14,8 @@ fn main() {
 
   let text_attribute = db.attribute("diary.entry/text").unwrap();
 
-  for datom in db.datoms(Index::Aevt(Some(text_attribute), None, None, None)).iter() {
-    let entry = db.entity(datom.entity);
+  for datom in db.datoms(Index::Aevt(Some(text_attribute), None, None, None)).unwrap().iter() {
+    let entry = db.entity(datom.entity).unwrap();
     println!("{:?}: {:?}", entry["diary.entry/date"][0], entry["diary.entry/text"]);
   }
 
@@ -24,12 +24,14 @@ fn main() {
 
     let entry = db.tempid();
     db.transact(&[(Assert, entry, "diary.entry/date", Value::DateTime(chrono::Utc::now())),
-                  (Assert, entry, "diary.entry/text", line.into())]);
+                  (Assert, entry, "diary.entry/text", line.into())])
+      .unwrap();
   }
 }
 
 fn store_schema(db: &mut ratomic::SqliteDb) {
   let schema_tx = &[(Assert, db.tempid(), "db/ident", "diary.entry/text"),
                     (Assert, db.tempid(), "db/ident", "diary.entry/date")];
-  db.transact(schema_tx);
+  db.transact(schema_tx)
+    .unwrap();
 }

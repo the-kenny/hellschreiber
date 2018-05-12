@@ -85,32 +85,32 @@ pub fn test_seed_datoms<D: Db>(db: D) {
 pub fn test_entity<D: Db>(mut db: D) {
   use tests::data::*;
 
-  db.store_datoms(&tests::data::make_test_data());
+  db.store_datoms(&tests::data::make_test_data()).unwrap();
   validate_datoms(&db.all_datoms());
 
-  assert_eq!(db.entity(EntityId(99999)).values.len(), 1);
-  assert_eq!(db.entity(EntityId(99999)).values[&attr::id], vec![Value::Int(99999)]);
+  assert_eq!(db.entity(EntityId(99999)).unwrap().values.len(), 1);
+  assert_eq!(db.entity(EntityId(99999)).unwrap().values[&attr::id], vec![Value::Int(99999)]);
 
-  let heinz = db.entity(EntityId(1)).values;
+  let heinz = db.entity(EntityId(1)).unwrap().values;
   assert_eq!(heinz.len(), 3);   // name + age + db/id
   assert_eq!(heinz.get(&attr::id), Some(&vec![Value::Int(1)]));
   assert_eq!(heinz.get(&person_name), Some(&vec![Value::Str("Heinz".into())]));
   assert_eq!(heinz.get(&person_age), Some(&vec![Value::Int(42)]));
   assert_eq!(heinz.get(&album_name), None);
 
-  let karl  = db.entity(EntityId(2)).values;
+  let karl  = db.entity(EntityId(2)).unwrap().values;
   assert_eq!(karl.len(), 3);    // name + children + db/id
   assert_eq!(karl[&person_name], vec![Value::Str("Karl".into())]);
   assert_eq!(karl[&person_children], vec![Value::Str("Philipp".into()),
                                           Value::Str("Jens".into())]);
 
-  let nevermind = db.entity(EntityId(3)).values;
+  let nevermind = db.entity(EntityId(3)).unwrap().values;
   assert_eq!(nevermind.len(), 2);
   assert_eq!(nevermind.get(&tests::data::album_name), Some(&vec![Value::Str("Nevermind".into())]));
 }
 
 pub fn test_eavt_datoms<D: Db>(mut db: D) {
-  db.store_datoms(&tests::data::make_test_data());
+  db.store_datoms(&tests::data::make_test_data()).unwrap();
 
   let pn = tests::data::person_name;
   let pa = tests::data::person_age;
@@ -121,7 +121,7 @@ pub fn test_eavt_datoms<D: Db>(mut db: D) {
   let karl      = EntityId(2);
   let nevermind = EntityId(3);
 
-  let eavt = db.datoms(Index::Eavt(None, None, None, None));
+  let eavt = db.datoms(Index::Eavt(None, None, None, None)).unwrap(); // TODO
   let pairs = eavt.iter()
     .filter(|d| d.tx != EntityId(0))
     .map(|d| (d.attribute, d.entity))
@@ -134,32 +134,32 @@ pub fn test_eavt_datoms<D: Db>(mut db: D) {
                          (an, nevermind)]);
 
   // None
-  let eavt = db.datoms(Index::Eavt(Some(EntityId(99999)), None, None, None));
+  let eavt = db.datoms(Index::Eavt(Some(EntityId(99999)), None, None, None)).unwrap(); // TODO
   assert!(eavt.iter().map(|d| d.entity).collect::<Vec<_>>().is_empty());
 
   // Heinz
-  let eavt = db.datoms(Index::Eavt(Some(heinz), None, None, None));
+  let eavt = db.datoms(Index::Eavt(Some(heinz), None, None, None)).unwrap(); // TODO
   assert_eq!(eavt.iter().map(|d| d.entity).collect::<Vec<_>>(),
              vec![heinz,heinz]);
   assert_eq!(eavt.iter().map(|d| d.attribute).collect::<Vec<_>>(),
              vec![pn, pa]);
 
   // Heinz, just person/age
-  let eavt = db.datoms(Index::Eavt(Some(heinz), Some(pa), None, None));
+  let eavt = db.datoms(Index::Eavt(Some(heinz), Some(pa), None, None)).unwrap(); // TODO
   assert_eq!(eavt.iter().map(|d| d.entity).collect::<Vec<_>>(),
              vec![heinz]);
   assert_eq!(eavt.iter().map(|d| d.attribute).collect::<Vec<_>>(),
              vec![pa]);
 
   // Nevermind
-  let eavt = db.datoms(Index::Eavt(Some(nevermind), None, None, None));
+  let eavt = db.datoms(Index::Eavt(Some(nevermind), None, None, None)).unwrap(); // TODO
   assert_eq!(eavt.iter().map(|d| d.entity).collect::<Vec<_>>(),
              vec![nevermind]);
   assert_eq!(eavt.iter().map(|d| d.attribute).collect::<Vec<_>>(),
              vec![an]);
 
   // Nevermind, person/age
-  let eavt = db.datoms(Index::Eavt(Some(nevermind), Some(pa), None, None));
+  let eavt = db.datoms(Index::Eavt(Some(nevermind), Some(pa), None, None)).unwrap(); // TODO
   assert_eq!(eavt.iter().map(|d| d.entity).collect::<Vec<_>>(),
              vec![]);
   assert_eq!(eavt.iter().map(|d| d.attribute).collect::<Vec<_>>(),
@@ -170,7 +170,7 @@ pub fn test_eavt_datoms<D: Db>(mut db: D) {
 pub fn test_aevt_datoms<D: Db>(mut db: D) {
   let tx = &[(Assert, db.tempid(), "db/ident", "person/name"),
              (Assert, db.tempid(), "db/ident", "person/age")];
-  db.transact(tx);
+  db.transact(tx).unwrap();
 
   let karl = db.tempid();
   let heinz = db.tempid();
@@ -178,18 +178,18 @@ pub fn test_aevt_datoms<D: Db>(mut db: D) {
   let data_tx = &[(Assert, karl, "person/name", Value::Str("Karl".into())),
                   (Assert, karl, "person/age", 42.into()),
                   (Assert, heinz, "person/name", "Heinz".into())];
-  db.transact(data_tx);
+  db.transact(data_tx).unwrap();
 
   let person_name_attr = db.attribute("person/name").unwrap();
   let person_age_attr = db.attribute("person/age").unwrap();
 
-  assert_eq!(2, db.datoms(Index::Aevt(Some(person_name_attr), None, None, None)).len());
-  assert_eq!(1, db.datoms(Index::Aevt(Some(person_age_attr),  None, None, None)).len());
+  assert_eq!(2, db.datoms(Index::Aevt(Some(person_name_attr), None, None, None)).unwrap().len());
+  assert_eq!(1, db.datoms(Index::Aevt(Some(person_age_attr),  None, None, None)).unwrap().len());
 }
 
 pub fn test_db_equality<D: Db, E: Db>(mut db1: D, mut db2: E) {
-  db1.store_datoms(&tests::data::make_test_data());
-  db2.store_datoms(&tests::data::make_test_data());
+  db1.store_datoms(&tests::data::make_test_data()).unwrap();
+  db2.store_datoms(&tests::data::make_test_data()).unwrap();
 
   // TODO: Randomize test data
 
@@ -202,8 +202,8 @@ pub fn test_db_equality<D: Db, E: Db>(mut db1: D, mut db2: E) {
               Index::Eavt(Some(EntityId(999)), None,              None, None),
               Index::Eavt(None,                Some(person_name), None, None)].iter() {
 
-    assert_eq!(db1.datoms(idx.clone()),
-               db2.datoms(idx.clone()),
+    assert_eq!(db1.datoms(idx.clone()).unwrap(),
+               db2.datoms(idx.clone()).unwrap(),
                "Equality of db1 and db2 for the {:?} index", idx);
   }
 }
@@ -212,7 +212,7 @@ pub fn test_fn_attribute<D: Db>(mut db: D) {
   // TODO: Use `str` as db/ident
   let schema = &[(Assert, TempId(42), attr::ident, Value::Str("person_name".into())),
                  (Assert, TempId(42), attr::doc, Value::Str("The name of a person".into()))];
-  db.transact(schema);
+  db.transact(schema).unwrap();
   assert!(db.attribute("person_name").is_some());
 }
 
@@ -220,29 +220,29 @@ pub fn test_db_metadata<D: Db>(db: D) {
   let Attribute(ident_eid) = "db/ident".to_attribute(&db).unwrap();
   let Attribute(doc_eid) = "db/doc".to_attribute(&db).unwrap();
 
-  assert!(!db.entity(ident_eid).values.is_empty());
-  assert!(!db.entity(doc_eid).values.is_empty());
+  assert!(!db.entity(ident_eid).unwrap().values.is_empty());
+  assert!(!db.entity(doc_eid).unwrap().values.is_empty());
 }
 
 pub fn test_string_attributes<D: Db>(mut db: D) {
   let tx = [(Assert, db.tempid(), "db/ident", "xx")];
-  db.transact(&tx);
+  db.transact(&tx).unwrap();
 }
 
 pub fn test_highest_eid<D: Db>(mut db: D) {
   assert_eq!(db.highest_eid(), EntityId(1000));
 
-  db.transact(&[(Assert, TempId(42), attr::ident, "foo/bar")]);
+  db.transact(&[(Assert, TempId(42), attr::ident, "foo/bar")]).unwrap();
   assert_eq!(db.highest_eid(), EntityId(1001));
 }
 
 pub fn test_transact_panics_for_unknown_attributes<D: Db>(mut db: D) {
   let tx = [(Assert, TempId(42), Attribute(db.highest_eid()), "xx")];
-  db.transact(&tx);
+  db.transact(&tx).unwrap();
 }
 
 pub fn test_entity_index_trait<D: Db>(db: D) {
-  let entity = db.entity(attr::ident.0);
+  let entity = db.entity(attr::ident.0).unwrap();
   assert_eq!(false, entity["db/ident"].is_empty());
   assert_eq!(true,  entity["unknown/attribute"].is_empty());
 }

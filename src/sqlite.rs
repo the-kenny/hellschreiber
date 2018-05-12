@@ -3,6 +3,7 @@ extern crate serde_json;
 
 use super::*;
 
+use failure::Error;
 use std::path::Path;
 
 #[derive(Debug)]
@@ -11,18 +12,18 @@ pub struct SqliteDb {
 }
 
 impl SqliteDb {
-  pub fn new() -> Self {
+  pub fn new() -> Result<Self, Error> {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
 
     conn.execute_batch(include_str!("schema.sql"))
       .unwrap();
 
     let mut db = SqliteDb { conn: conn };
-    db.store_datoms(&seed_datoms());
-    db
+    db.store_datoms(&seed_datoms())?;
+    Ok(db)
   }
 
-  pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, rusqlite::Error> {
+  pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
     let conn = rusqlite::Connection::open(path).unwrap();
 
     if !Self::has_sqlite_table(&conn, "datoms")? {
@@ -33,7 +34,7 @@ impl SqliteDb {
     let mut db = SqliteDb { conn: conn };
 
     if db.attribute("db/ident").is_none() {
-      db.store_datoms(&seed_datoms());
+      db.store_datoms(&seed_datoms())?;
     }
 
     Ok(db)
@@ -119,7 +120,7 @@ impl Db for SqliteDb {
     EntityId(std::cmp::max(n, 1000))
   }
 
-  fn datoms<'a>(&'a self, index: Index) -> Datoms {
+  fn datoms<'a>(&'a self, index: Index) -> Result<Datoms, Error> {
     let (e, a, v, t) = index.unwrap();
 
     let order_statement = match index {
@@ -135,7 +136,7 @@ impl Db for SqliteDb {
          and case when ?2 notnull then a == ?2 else 1 end
          and case when ?3 notnull then v == ?3 else 1 end
          and case when ?4 notnull then t == ?4 else 1 end
-       order by {}", order_statement)).unwrap();
+       order by {}", order_statement))?;
 
     let entity_query_input = match e {
       Some(EntityId(i)) => rusqlite::types::Value::Integer(i),
@@ -167,7 +168,7 @@ impl Db for SqliteDb {
       let v: Value = row.get(2);
       let t: TxId = row.get(3);
       (e, a, v, t)
-    }).unwrap().map(|r| r.unwrap())
+    })?.map(|r| r.unwrap())
       .map(|(e, a, v, tx)| Datom {
         entity: e,
         attribute: a,
@@ -177,11 +178,11 @@ impl Db for SqliteDb {
       })
       .collect::<Vec<_>>();
 
-    Cow::Owned(datoms)
+    Ok(Cow::Owned(datoms))
   }
 
-  fn store_datoms(&mut self, datoms: &[Datom]) {
-    let tx = self.conn.transaction().unwrap();
+  fn store_datoms(&mut self, datoms: &[Datom]) -> Result<(), Error> {
+    let tx = self.conn.transaction()?;
 
     {
       let (asserted, retracted): (Vec<&Datom>, Vec<&Datom>) = datoms.iter()
@@ -189,15 +190,14 @@ impl Db for SqliteDb {
 
       let mut insert = tx.prepare_cached(
         "insert into datoms (e,a,v,t) values (?1, ?2, ?3, ?4)"
-      ).unwrap();
+      )?;
 
       for d in asserted {
         assert!(d.status.is_assertion());
         insert.execute(&[&(d.entity.0),
                          &d.attribute.0,
                          &d.value,
-                         &d.tx.0])
-          .unwrap();
+                         &d.tx.0])?;
       }
 
       let mut retract = tx.prepare_cached(
@@ -218,12 +218,13 @@ impl Db for SqliteDb {
         retract.execute(&[&retracted_tx.0,
                           &d.entity.0,
                           &d.attribute.0,
-                          &d.value])
-          .unwrap();
+                          &d.value])?;
       }
     }
 
-    tx.commit().unwrap()
+    tx.commit()?;
+
+    Ok(())
   }
 }
 
