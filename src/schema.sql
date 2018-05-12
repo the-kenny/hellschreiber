@@ -8,6 +8,9 @@ create table datoms (
   retracted_tx integer default null
 );
 
--- create unique index eav_retracted_unique on datoms(e, a, v, retracted_tx);
+create index eavt on datoms(e, a, v, t);
+create index aevt on datoms(a, e, v, t);
+create index avet on datoms(a, v, e, t);
+create index vaet on datoms(v, a, e, t);
 
 commit;

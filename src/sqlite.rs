@@ -116,17 +116,6 @@ impl Db for SqliteDb {
     EntityId(std::cmp::max(n, 1000))
   }
 
-  // fn transact<T: Into<Fact>>(&mut self, _tx: &[T]) -> TxId {
-  //   // Note: This storage uses a special behavior for transactions: If
-  //   // a datom is retracted, we just set the `retracted_tx` in sqlite.
-  //   // This allows efficient querying of values as well as recreating
-  //   // the history of retractions. Care must be taken when returning a
-  //   // "history database" which contains all assertions and
-  //   // retractions
-
-  //   unimplemented!("Transact isn't implemented")
-  // }
-
   fn datoms<'a>(&'a self, index: Index) -> Datoms {
     let (e, a, v, t) = index.unwrap();
     
@@ -167,16 +156,15 @@ impl Db for SqliteDb {
     };
 
     let datoms = query.query_map(&[&entity_query_input,
-                                       &attribute_query_input,
-                                       &value_query_input,
-                                       &tx_query_input], |row| {
+                                   &attribute_query_input,
+                                   &value_query_input,
+                                   &tx_query_input], |row| {
       let e = EntityId(row.get(0));
       let a = Attribute::new(EntityId(row.get(1)));
       let v: Value = row.get(2);
       let t: TxId = row.get(3);
       (e, a, v, t)
     }).unwrap().map(|r| r.unwrap())
-      // .flat_map(|(e, a)| self.attribute_values(e, a))
       .map(|(e, a, v, tx)| Datom {
         entity: e,
         attribute: a,
@@ -273,29 +261,6 @@ mod type_impls {
       Ok(ToSqlOutput::Owned(types::Value::Text(json)))
     }
   }
-
-
-  /*
-  impl types::FromSql for Value {
-    fn column_result(value: ValueRef) -> FromSqlResult<Self> {
-      match value {
-        ValueRef::Text(t)    => Ok(Value::Str(t.into())),
-        ValueRef::Integer(i) => Ok(Value::Int(i)),
-        _                    => unreachable!() // TODO
-      }
-    }
-  }
-
-  impl types::ToSql for Value {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
-      match self {
-        &Value::Str(ref s) => Ok(ToSqlOutput::Borrowed(ValueRef::Text(s))),
-        &Value::Int(i)     => Ok(ToSqlOutput::Owned(types::Value::Integer(i))),
-        &Value::Ref(eid)   => Ok(ToSqlOutput::Owned(types::Value::Integer(eid.0))),
-      }
-    }
-  }
-   */
 
   impl types::FromSql for EntityId {
     fn column_result(value: types::ValueRef) -> FromSqlResult<Self> {
