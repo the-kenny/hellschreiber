@@ -124,7 +124,7 @@ impl Db for SqliteDb {
       Index::Aevt(_, _, _, _) => "a, e, v, t asc",
     };
 
-    let mut query = self.conn.prepare(&format!(
+    let mut query = self.conn.prepare_cached(&format!(
       "select distinct e, a, v, t
        from datoms
        where retracted_tx is null
@@ -181,11 +181,11 @@ impl Db for SqliteDb {
     let tx = self.conn.transaction().unwrap();
 
     {
-      let mut insert = tx.prepare(
+      let mut insert = tx.prepare_cached(
         "insert into datoms (e,a,v,t,retracted_tx) values (?1, ?2, ?3, ?4, ?5)"
       ).unwrap();
 
-      let mut retract = tx.prepare(
+      let mut retract = tx.prepare_cached(
         "update datoms set retracted_tx = ?1
          where e = ?2 and a = ?3 and v = ?4"
       ).unwrap();
