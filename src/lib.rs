@@ -92,17 +92,13 @@ pub enum Status {
 
 impl Status {
   fn is_retraction(&self) -> bool {
-    self.retraction_tx().is_some()
+    match self {
+      Status::Retracted(_) => true,
+      _ => false
+    }
   }
 
   fn is_assertion(&self) -> bool { *self == Status::Added }
-
-  fn retraction_tx(&self) -> Option<EntityId> {
-    match *self {
-      Status::Retracted(tx) => Some(tx),
-      _                     => None
-    }
-  }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]

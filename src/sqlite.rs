@@ -97,7 +97,10 @@ impl Db for SqliteDb {
       added.status = Status::Added;
 
       let mut retracted = d.clone();
-      retracted.tx = retracted.status.retraction_tx().unwrap();
+      retracted.tx = match retracted.status {
+        Status::Retracted(tx) => tx,
+        _ => unreachable!()
+      };
 
       datoms.push(added);
       datoms.push(retracted);
@@ -118,7 +121,7 @@ impl Db for SqliteDb {
 
   fn datoms<'a>(&'a self, index: Index) -> Datoms {
     let (e, a, v, t) = index.unwrap();
-    
+
     let order_statement = match index {
       Index::Eavt(_, _, _, _) => "e, a, v, t asc",
       Index::Aevt(_, _, _, _) => "a, e, v, t asc",
@@ -181,31 +184,37 @@ impl Db for SqliteDb {
     let tx = self.conn.transaction().unwrap();
 
     {
+      let (asserted, retracted): (Vec<&Datom>, Vec<&Datom>) = datoms.iter()
+        .partition(|d| d.status.is_assertion());
+
       let mut insert = tx.prepare_cached(
-        "insert into datoms (e,a,v,t,retracted_tx) values (?1, ?2, ?3, ?4, ?5)"
+        "insert into datoms (e,a,v,t) values (?1, ?2, ?3, ?4)"
       ).unwrap();
 
-      let mut retract = tx.prepare_cached(
-        "update datoms set retracted_tx = ?1
-         where e = ?2 and a = ?3 and v = ?4"
-      ).unwrap();
-
-      let added     = datoms.iter().filter(|d| d.status.is_assertion());
-      let retracted = datoms.iter().filter(|d| d.status.is_retraction());
-
-      for d in added {
-        assert!(d.status == Status::Added);
+      for d in asserted {
+        assert!(d.status.is_assertion());
         insert.execute(&[&(d.entity.0),
                          &d.attribute.0,
                          &d.value,
-                         &d.tx.0,
-                         &d.status])
+                         &d.tx.0])
           .unwrap();
       }
 
+      let mut retract = tx.prepare_cached(
+        "update datoms set retracted_tx = ?1
+         where e = ?2
+           and a = ?3
+           and v = ?4"
+      ).unwrap();
+
+
       for d in retracted {
         assert!(d.status.is_retraction());
-        let retracted_tx = d.status.retraction_tx().unwrap();
+        let retracted_tx = match d.status {
+          Status::Retracted(tx) => tx,
+          _ => unreachable!()
+        };
+
         retract.execute(&[&retracted_tx.0,
                           &d.entity.0,
                           &d.attribute.0,
