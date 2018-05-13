@@ -14,16 +14,15 @@ pub use sqlite::SqliteDb;
 
 use failure::Error;
 use std::collections::{BTreeMap, BTreeSet};
-use std::borrow::Cow;
 use std::{fmt, ops};
 use std::sync::atomic;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct EntityId(i64);
 
 pub type TxId = EntityId;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
 pub struct Attribute(EntityId);
 
 impl Attribute {
@@ -242,7 +241,7 @@ impl<'a, D: Db> ops::Index<&'a str> for Entity<'a, D> {
 }
 
 
-pub type Datoms<'a> = Cow<'a, [Datom]>;
+pub type Datoms<'a> = Vec<Datom>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Index {
@@ -382,7 +381,7 @@ fn seed_datoms() -> Datoms<'static> {
     tx_instant
   ];
 
-  Cow::Owned(datoms)
+  datoms
 }
 
 #[derive(Debug, Clone)]

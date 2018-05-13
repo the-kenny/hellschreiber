@@ -29,7 +29,7 @@ impl Db for TestDb {
   fn all_datoms<'a>(&'a self) -> Datoms<'a> {
     let mut datoms = self.0.clone();
     datoms.sort_by_key(|d| (d.tx, d.attribute, d.status));
-    Cow::Owned(datoms)
+    datoms
   }
 
   fn datoms(&self, index: Index) -> Result<Datoms, Error> {
@@ -102,6 +102,6 @@ impl Db for TestDb {
       }
     });
 
-    Ok(Cow::Owned(datoms))
+    Ok(datoms)
   }
 }

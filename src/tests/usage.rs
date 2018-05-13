@@ -16,5 +16,3 @@ pub fn test_usage_001<D: Db>(mut db: D) {
 
   assert!(db.entity(heinz).unwrap()["person/name"].is_empty());
 }
-
-

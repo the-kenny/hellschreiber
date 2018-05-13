@@ -16,7 +16,7 @@ fn main() {
 
   for datom in db.datoms(Index::Aevt(Some(text_attribute), None, None, None)).unwrap().iter() {
     let entry = db.entity(datom.entity).unwrap();
-    println!("{:?}: {:?}", entry["diary.entry/date"][0], entry["diary.entry/text"]);
+    println!("{:?}: {}", entry["diary.entry/date"][0], entry["diary.entry/text"][0].as_str().unwrap());
   }
 
   for line in BufReader::new(std::io::stdin()).lines() {

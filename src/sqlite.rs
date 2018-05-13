@@ -110,7 +110,7 @@ impl Db for SqliteDb {
     // TODO: Move to helper
     datoms.sort_by_key(|d| (d.tx, d.attribute, d.status));
 
-    Cow::Owned(datoms)
+    datoms
   }
 
   fn highest_eid(&self) -> EntityId {
@@ -178,7 +178,7 @@ impl Db for SqliteDb {
       })
       .collect::<Vec<_>>();
 
-    Ok(Cow::Owned(datoms))
+    Ok(datoms)
   }
 
   fn store_datoms(&mut self, datoms: &[Datom]) -> Result<(), Error> {
