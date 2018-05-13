@@ -1,12 +1,12 @@
-extern crate ratomic;
+extern crate hellschreiber;
 extern crate chrono;
 
-use ratomic::*;
+use hellschreiber::*;
 
 use std::io::{BufRead, BufReader};
 
 fn main() {
-  let mut db = ratomic::SqliteDb::open("diary.sqlite").unwrap();
+  let mut db = hellschreiber::SqliteDb::open("diary.sqlite").unwrap();
 
   if !db.has_attribute("diary.entry/text") {
     store_schema(&mut db);
@@ -29,7 +29,7 @@ fn main() {
   }
 }
 
-fn store_schema(db: &mut ratomic::SqliteDb) {
+fn store_schema(db: &mut hellschreiber::SqliteDb) {
   let schema_tx = &[(Assert, db.tempid(), "db/ident", "diary.entry/text"),
                     (Assert, db.tempid(), "db/ident", "diary.entry/date")];
   db.transact(schema_tx)

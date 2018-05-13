@@ -1,6 +1,6 @@
 [package]
 authors = ["Moritz Ulrich <moritz@tarn-vedra.de>"]
-name = "ratomic"
+name = "hellschreiber"
 version = "0.1.0"
 
 [dependencies]
@@ -8,7 +8,6 @@ derive_more = "0.10.0"
 edn = "0.3.0"
 failure = "0.1.1"
 lazy_static = "1.0.0"
-log = "*"
 rusqlite = "0.12.0"
 serde = "1.0.51"
 serde_derive = "1.0.51"
