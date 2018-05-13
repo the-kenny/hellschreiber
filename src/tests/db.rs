@@ -252,6 +252,23 @@ pub fn test_entity_index_trait<D: Db>(db: D) {
   assert_eq!(true,  entity["unknown/attribute"].is_empty());
 }
 
+pub fn test_avet_index<D: Db>(mut db: D) {
+  // AVET should only contain datoms which are marked as unique (which
+  // is currently implementation-defined).
+  //
+  // Current implementation: Only `db/ident` is marked as unique
+
+  db.transact(&[(Assert, TempId(0), "db/ident", Value::Str("foo/bar".into()))]).unwrap();
+  db.transact(&[(Assert, TempId(0), "foo/bar", Value::Int(42))]).unwrap();
+
+  let datoms = db.datoms(Index::Avet(None, None, None, None)).unwrap();
+  assert!(datoms.len() > 0);
+
+  for datom in datoms {
+    assert_eq!(datom.attribute, attr::ident);
+  }
+}
+
 /*
 pub fn test_ref_follow<D: Db>(db: D) {
   let entity = db.entity(attr::ident.0);

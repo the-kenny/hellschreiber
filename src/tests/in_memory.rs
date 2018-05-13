@@ -1,9 +1,11 @@
 use ::*;
 
 #[derive(Debug)]
+#[allow(unused)]
 pub struct TestDb(Vec<Datom>);
 
 impl TestDb {
+  #[allow(unused)]
   pub fn new() -> Self {
     let mut db = TestDb(vec![]);
     db.store_datoms(&seed_datoms()).unwrap();
@@ -83,8 +85,17 @@ impl Db for TestDb {
       }
     }
 
+    let indexed_attributes = self.indexed_attributes();
+
     let mut datoms = datoms.into_iter()
       .map(|EavEquality(d)| d)
+      .filter(|d| {
+        // Handle special-case for AVET index (which only contains indexed datoms)
+        match index {
+          Index::Avet(_, _, _, _) => indexed_attributes.contains(&d.attribute),
+          _ => true
+        }
+      })
       .collect::<Vec<Datom>>();
 
     datoms.sort_by(|l,r| {
@@ -99,6 +110,7 @@ impl Db for TestDb {
       match index {
         Index::Eavt(_, _, _, _) => cmp!(entity, attribute, value, tx),
         Index::Aevt(_, _, _, _) => cmp!(attribute, entity, value, tx),
+        Index::Avet(_, _, _, _) => cmp!(attribute, value, entity, tx),
       }
     });
 

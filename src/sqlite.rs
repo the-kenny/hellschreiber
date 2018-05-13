@@ -11,32 +11,21 @@ pub struct SqliteDb {
   conn: rusqlite::Connection,
 }
 
+// TODO: Implement dynamic `Db::indexed_attributes`
 impl SqliteDb {
   pub fn new() -> Result<Self, Error> {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
 
-    conn.execute_batch(include_str!("schema.sql"))
-      .unwrap();
-
     let mut db = SqliteDb { conn: conn };
-    db.store_datoms(&seed_datoms())?;
+    db.initialize()?;
     Ok(db)
   }
 
   pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
     let conn = rusqlite::Connection::open(path).unwrap();
 
-    if !Self::has_sqlite_table(&conn, "datoms")? {
-      conn.execute_batch(include_str!("schema.sql"))
-        .unwrap();
-    }
-
     let mut db = SqliteDb { conn: conn };
-
-    if db.attribute("db/ident").is_none() {
-      db.store_datoms(&seed_datoms())?;
-    }
-
+    db.initialize()?;
     Ok(db)
   }
 
@@ -46,6 +35,24 @@ impl SqliteDb {
       Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
       err => err
     }
+  }
+
+  fn initialize(&mut self) -> Result<(), Error> {
+    if !Self::has_sqlite_table(&self.conn, "datoms")? {
+      self.conn.execute_batch(include_str!("schema.sql"))?
+    }
+
+    if self.attribute("db/ident").is_none() {
+      self.store_datoms(&seed_datoms())?;
+    }
+
+    for unique in self.indexed_attributes() {
+      self.conn.execute("insert or ignore into unique_attributes (e) values (?1)", &[&unique.0])?;
+    }
+
+    self.conn.execute("pragma foreign_keys = on", &[])?;
+
+    Ok(())
   }
 
   // TODO: Get rid of this
@@ -124,19 +131,33 @@ impl Db for SqliteDb {
     let (e, a, v, t) = index.unwrap();
 
     let order_statement = match index {
-      Index::Eavt(_, _, _, _) => "e, a, v, t asc",
-      Index::Aevt(_, _, _, _) => "a, e, v, t asc",
+      Index::Eavt(_, _, _, _) => "order by datoms.e, datoms.a, datoms.v, datoms.t asc",
+      Index::Aevt(_, _, _, _) => "order by datoms.a, datoms.e, datoms.v, datoms.t asc",
+      Index::Avet(_, _, _, _) => "order by datoms.a, datoms.e, datoms.v, datoms.t asc",
+    };
+
+    // Limit results to attributes in `unique_attributes`
+    let additional_where_clauses = match index {
+      // Index::Avet(_, _, _, _) => "and a in (select e from unique_attributes where e = datoms.a)",
+      _ => ""
+    };
+
+    let join_clause = match index {
+      Index::Avet(_, _, _, _) => "join unique_attributes on unique_attributes.e = datoms.a",
+      _ => ""
     };
 
     let mut query = self.conn.prepare_cached(&format!(
-      "select distinct e, a, v, t
+      "select distinct datoms.e, datoms.a, datoms.v, datoms.t
        from datoms
+       {}
        where retracted_tx is null
-         and case when ?1 notnull then e == ?1 else 1 end
-         and case when ?2 notnull then a == ?2 else 1 end
-         and case when ?3 notnull then v == ?3 else 1 end
-         and case when ?4 notnull then t == ?4 else 1 end
-       order by {}", order_statement))?;
+         and case when ?1 notnull then datoms.e == ?1 else 1 end
+         and case when ?2 notnull then datoms.a == ?2 else 1 end
+         and case when ?3 notnull then datoms.v == ?3 else 1 end
+         and case when ?4 notnull then datoms.t == ?4 else 1 end
+         {}
+       {}", join_clause, additional_where_clauses, order_statement))?;
 
     let entity_query_input = match e {
       Some(EntityId(i)) => rusqlite::types::Value::Integer(i),

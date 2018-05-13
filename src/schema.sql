@@ -13,4 +13,10 @@ create index aevt on datoms(a, e, v, t);
 create index avet on datoms(a, v, e, t);
 create index vaet on datoms(v, a, e, t);
 
+-- `e` should reference datoms.e but can't as datoms.e isn't the
+-- primary key of the table
+create table unique_attributes (
+  e integer not null unique
+);
+
 commit;

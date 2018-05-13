@@ -13,9 +13,10 @@ pub mod sqlite;
 pub use sqlite::SqliteDb;
 
 use failure::Error;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::{fmt, ops};
 use std::sync::atomic;
+use std::iter::FromIterator;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct EntityId(i64);
@@ -202,7 +203,7 @@ pub struct Entity<'a, D: Db + 'a> {
 impl<'a, D: Db> fmt::Debug for Entity<'a, D> {
   fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
     let pretty_values: BTreeMap<_, &Vec<Value>> = self.values.iter()
-      .map(|(attr, value)| (self.db.attribute_name(attr).unwrap(), value))
+      .map(|(attr, value)| (self.db.attribute_name(*attr).unwrap(), value))
       .collect();
 
     write!(f, "<Entity {:?} {:?}>", self.eid, pretty_values)
@@ -247,7 +248,7 @@ pub type Datoms<'a> = Vec<Datom>;
 pub enum Index {
   Eavt(Option<EntityId>, Option<Attribute>, Option<Value>, Option<TxId>),
   Aevt(Option<Attribute>, Option<EntityId>, Option<Value>, Option<TxId>),
-  // Vaet,
+  Avet(Option<Attribute>, Option<Value>, Option<EntityId>, Option<TxId>),
 }
 
 impl Index {
@@ -255,6 +256,7 @@ impl Index {
     let (e, a, ref v, t) = match self {
       &Index::Eavt(e, a, ref v, t) => (e, a, v, t),
       &Index::Aevt(a, e, ref v, t) => (e, a, v, t),
+      &Index::Avet(a, ref v, e, t) => (e, a, v, t),
     };
 
     let e = e.is_none() || e.unwrap() == datom.entity;
@@ -269,11 +271,12 @@ impl Index {
     match self.clone() {
       Index::Eavt(e, a, v, t) => (e, a, v, t),
       Index::Aevt(a, e, v, t) => (e, a, v, t),
+      Index::Avet(a, v, e, t) => (e, a, v, t),
     }
   }
 }
 
-// TODO: AVET, AEVT, VAET
+// TODO: VAET
 
 // VAET is used for navigating relations backwards and stores all
 // datoms with *reference* attributes. Given VAET, you can not only find
@@ -460,7 +463,7 @@ pub trait Db: Sized {
         Operation::TempidAssertion(tid, a, v) => (eids[&tid], a, v, Status::Added)
       };
 
-      if !self.attribute_name(&a).is_some() {
+      if !self.attribute_name(a).is_some() {
         return Err(TransactionError::NonIdentAttributeTransacted(a).into())
       }
 
@@ -534,16 +537,20 @@ pub trait Db: Sized {
     self.attribute(attribute_name).is_some()
   }
 
+  fn indexed_attributes(&self) -> HashSet<Attribute> {
+    HashSet::from_iter(vec![attr::ident])
+  }
+
   fn attribute(&self, attribute_name: &str) -> Option<Attribute> {
-    // TODO: Use VAET
-    self.datoms(Index::Eavt(None, Some(attr::ident), Some(Value::Str(attribute_name.into())), None)).unwrap() // TODO
+    self.datoms(Index::Avet(Some(attr::ident), Some(Value::Str(attribute_name.into())), None, None)).unwrap()
       .iter().next()
       .map(|d| Attribute::new(d.entity))
   }
 
-  fn attribute_name<'a>(&'a self, attribute: &Attribute) -> Option<String> {
-    self.datoms(Index::Eavt(Some(attribute.0), Some(attr::ident), None, None)).unwrap() // TODO
-      .into_iter().next()
+  fn attribute_name<'a>(&'a self, attribute: Attribute) -> Option<String> {
+    self.datoms(Index::Avet(Some(attr::ident), None, Some(attribute.0) , None)).unwrap() // TODO
+      .into_iter()
+      .next()
       .and_then(|d| match d.value {
         Value::Str(ref s) => Some(s.clone()),
         _ => None
@@ -551,13 +558,11 @@ pub trait Db: Sized {
   }
 }
 
-
 #[cfg(test)]
 mod tests {
   mod db;
   mod data;
   mod in_memory;
-
   mod usage;
 
   #[macro_export]
@@ -583,6 +588,7 @@ mod tests {
         #[test] fn test_string_attributes() { super::db::test_string_attributes($t) }
         #[test] fn test_highest_eid() { super::db::test_highest_eid($t) }
         #[test] fn test_transact_unknown_attribute_error() { super::db::test_transact_unknown_attribute_error($t) }
+        #[test] fn test_avet_index() { super::db::test_avet_index($t); }
 
         #[test] fn test_entity_index_trait() { super::db::test_entity_index_trait($t) }
 
