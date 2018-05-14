@@ -127,13 +127,14 @@ impl Db for SqliteDb {
     EntityId(std::cmp::max(n, 1000))
   }
 
-  fn datoms<'a, CS: Into<Components>>(&'a self, index: Index, components: CS) -> Result<Datoms, Error> {
-    let (e, a, v, t) = components.into().eavt();
+  fn datoms<'a, I: Into<Index>>(&'a self, index: I) -> Result<Datoms, Error> {
+    let index = index.into();
+    let (e, a, v, t) = index.eavt();
 
-    let order_statement = match index {
-      Index::Eavt => "order by datoms.e, datoms.a, datoms.v, datoms.t asc",
-      Index::Aevt => "order by datoms.a, datoms.e, datoms.v, datoms.t asc",
-      Index::Avet => "order by datoms.a, datoms.e, datoms.v, datoms.t asc",
+    let order_statement = match index.index {
+      IndexType::Eavt => "order by datoms.e, datoms.a, datoms.v, datoms.t asc",
+      IndexType::Aevt => "order by datoms.a, datoms.e, datoms.v, datoms.t asc",
+      IndexType::Avet => "order by datoms.a, datoms.e, datoms.v, datoms.t asc",
     };
 
     // Limit results to attributes in `unique_attributes`
@@ -141,8 +142,8 @@ impl Db for SqliteDb {
       _ => ""
     };
 
-    let join_clause = match index {
-      Index::Avet => "join unique_attributes on unique_attributes.e = datoms.a",
+    let join_clause = match index.index {
+      IndexType::Avet => "join unique_attributes on unique_attributes.e = datoms.a",
       _ => ""
     };
 
