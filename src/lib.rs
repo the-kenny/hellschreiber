@@ -129,47 +129,6 @@ pub struct Datom {
   pub status:    Status,
 }
 
-impl Datom {
-  pub fn from_edn<D: Db>(db: &D, edn: edn::Value) -> Result<Self, ()> {
-    use edn::Value::*;
-
-    if let Vector(x) = edn {
-      if x.len() != 4 { return Err(()) }
-
-      let mut x = x.into_iter();
-      let e = x.next().unwrap();
-      let a = x.next().unwrap();
-      let v = x.next().unwrap();
-      let t = x.next().unwrap();
-
-      match (e,a,v,t) {
-        (Integer(e), Keyword(a), v, Integer(t)) => {
-          let v = match v {
-            String(s)  => Value::Str(s),
-            Integer(i) => Value::Int(i),
-            x          => unimplemented!("Conversion from EDN value {:?} isn't implemented", x),
-          };
-
-          let a = db.attribute(&a).unwrap();
-
-          let d = Datom {
-            entity: EntityId(e),
-            attribute: a, // TODO
-            value: v,
-            tx: EntityId(t),
-            status: Status::Added,
-          };
-
-          println!("{:?}", d);
-        },
-        _ => unreachable!()
-      }
-    }
-
-    unimplemented!("Implementation of from_edn")
-  }
-}
-
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub struct TempId(pub i64);
 
