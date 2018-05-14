@@ -227,20 +227,6 @@ pub enum Index {
 }
 
 impl Index {
-  // pub fn matches(&self, components: &Components, datom: &Datom) -> bool {
-  //   let e = components.e;
-  //   let a = components.a;
-  //   let ref v = components.v;
-  //   let t = components.t;
-
-  //   let e = e.is_none() || e.unwrap() == datom.entity;
-  //   let a = a.is_none() || a.unwrap() == datom.attribute;
-  //   let v = v.is_none() || v.as_ref().unwrap() == &datom.value;
-  //   let t = t.is_none() || t.unwrap() == datom.tx;
-
-  //   return e && a && v && t;;
-  // }
-
   pub fn e(self, e: EntityId)  -> FilteredIndex { FilteredIndex::new(self).e(e) }
   pub fn a(self, a: Attribute) -> FilteredIndex { FilteredIndex::new(self).a(a) }
   pub fn v(self, v: Value)     -> FilteredIndex { FilteredIndex::new(self).v(v) }
