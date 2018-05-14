@@ -66,8 +66,24 @@ impl Value {
     }
   }
 
+  pub fn as_string(&self) -> Option<String> {
+    if let &Value::Str(ref s) = self {
+      Some(s.clone())
+    } else {
+      None
+    }
+  }
+
   pub fn as_int(&self) -> Option<i64> {
     if let &Value::Int(i) = self {
+      Some(i)
+    } else {
+      None
+    }
+  }
+
+  pub fn as_datetime(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+    if let &Value::DateTime(i) = self {
       Some(i)
     } else {
       None

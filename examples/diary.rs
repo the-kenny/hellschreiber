@@ -5,6 +5,22 @@ use hellschreiber::*;
 
 use std::io::{BufRead, BufReader};
 
+struct DiaryEntry {
+  eid: EntityId,
+  date: chrono::DateTime<chrono::Utc>,
+  text: String
+}
+
+impl<'a, D: Db> From<Entity<'a, D>> for DiaryEntry {
+  fn from(o: Entity<'a, D>) -> DiaryEntry {
+    DiaryEntry {
+      eid: o.eid,
+      date: o["diary.entry/date"][0].as_datetime().unwrap(),
+      text: o["diary.entry/text"][0].as_string().unwrap(),
+    }
+  }
+}
+
 fn main() {
   let mut db = hellschreiber::SqliteDb::open("diary.sqlite").unwrap();
 
@@ -15,8 +31,8 @@ fn main() {
   let text_attribute = db.attribute("diary.entry/text").unwrap();
 
   for datom in db.datoms(Index::Aevt(Some(text_attribute), None, None, None)).unwrap().iter() {
-    let entry = db.entity(datom.entity).unwrap();
-    println!("{:?}: {}", entry["diary.entry/date"][0], entry["diary.entry/text"][0].as_str().unwrap());
+    let entry: DiaryEntry = db.entity(datom.entity).unwrap().into();
+    println!("{:?}: {}", entry.date, entry.text);
   }
 
   for line in BufReader::new(std::io::stdin()).lines() {
