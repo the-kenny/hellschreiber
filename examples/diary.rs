@@ -30,7 +30,7 @@ fn main() {
 
   let text_attribute = db.attribute("diary.entry/text").unwrap();
 
-  for datom in db.datoms(Index::Aevt(Some(text_attribute), None, None, None)).unwrap().iter() {
+  for datom in db.datoms(Index::Aevt, Components::empty().a(text_attribute)).unwrap().iter() {
     let entry: DiaryEntry = db.entity(datom.entity).unwrap().into();
     println!("{:?}: {}", entry.date, entry.text);
   }

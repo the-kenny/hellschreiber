@@ -34,9 +34,10 @@ impl Db for TestDb {
     datoms
   }
 
-  fn datoms(&self, index: Index) -> Result<Datoms, Error> {
+  fn datoms<CS: Into<Components>>(&self, index: Index, components: CS) -> Result<Datoms, Error> {
     let mut raw_datoms = self.0.clone();
-    raw_datoms.retain(|d| index.matches(&d));
+    let components = components.into();
+    raw_datoms.retain(|d| index.matches(&components, &d));
     raw_datoms.sort_by_key(|d| d.tx);
 
     #[derive(Debug)]
@@ -92,7 +93,7 @@ impl Db for TestDb {
       .filter(|d| {
         // Handle special-case for AVET index (which only contains indexed datoms)
         match index {
-          Index::Avet(_, _, _, _) => indexed_attributes.contains(&d.attribute),
+          Index::Avet => indexed_attributes.contains(&d.attribute),
           _ => true
         }
       })
@@ -108,9 +109,9 @@ impl Db for TestDb {
       }
 
       match index {
-        Index::Eavt(_, _, _, _) => cmp!(entity, attribute, value, tx),
-        Index::Aevt(_, _, _, _) => cmp!(attribute, entity, value, tx),
-        Index::Avet(_, _, _, _) => cmp!(attribute, value, entity, tx),
+        Index::Eavt => cmp!(entity, attribute, value, tx),
+        Index::Aevt => cmp!(attribute, entity, value, tx),
+        Index::Avet => cmp!(attribute, value, entity, tx),
       }
     });
 

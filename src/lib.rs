@@ -219,20 +219,19 @@ impl<'a, D: Db> ops::Index<&'a str> for Entity<'a, D> {
 
 pub type Datoms<'a> = Vec<Datom>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Index {
-  Eavt(Option<EntityId>, Option<Attribute>, Option<Value>, Option<TxId>),
-  Aevt(Option<Attribute>, Option<EntityId>, Option<Value>, Option<TxId>),
-  Avet(Option<Attribute>, Option<Value>, Option<EntityId>, Option<TxId>),
+  Eavt,
+  Aevt,
+  Avet
 }
 
 impl Index {
-  pub fn matches(&self, datom: &Datom) -> bool {
-    let (e, a, ref v, t) = match self {
-      &Index::Eavt(e, a, ref v, t) => (e, a, v, t),
-      &Index::Aevt(a, e, ref v, t) => (e, a, v, t),
-      &Index::Avet(a, ref v, e, t) => (e, a, v, t),
-    };
+  pub fn matches(&self, components: &Components, datom: &Datom) -> bool {
+    let e = components.e;
+    let a = components.a;
+    let ref v = components.v;
+    let t = components.t;
 
     let e = e.is_none() || e.unwrap() == datom.entity;
     let a = a.is_none() || a.unwrap() == datom.attribute;
@@ -241,13 +240,49 @@ impl Index {
 
     return e && a && v && t;;
   }
+}
 
-  fn unwrap<'a>(&'a self) -> (Option<EntityId>, Option<Attribute>, Option<Value>, Option<TxId>) {
-    match self.clone() {
-      Index::Eavt(e, a, v, t) => (e, a, v, t),
-      Index::Aevt(a, e, v, t) => (e, a, v, t),
-      Index::Avet(a, v, e, t) => (e, a, v, t),
-    }
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Components {
+  e: Option<EntityId>,
+  a: Option<Attribute>,
+  v: Option<Value>,
+  t: Option<TxId>,
+}
+
+impl Components {
+  pub fn new() -> Self { Self::empty() }
+  pub fn empty() -> Self { Default::default() }
+
+  pub fn e(mut self, e: EntityId) -> Self { self.e = Some(e); self }
+  pub fn a(mut self, a: Attribute) -> Self { self.a = Some(a); self }
+  pub fn v(mut self, v: Value) -> Self { self.v = Some(v); self }
+  pub fn t(mut self, t: TxId) -> Self { self.t = Some(t); self }
+}
+
+impl Components {
+  fn eavt(&self) -> (Option<EntityId>, Option<Attribute>, Option<Value>, Option<TxId>) {
+    (self.e, self.a, self.v.clone(), self.t)
+  }
+}
+
+impl From<EntityId> for Components { fn from(e: EntityId) -> Components { Components::new().e(e)} }
+impl From<Attribute> for Components { fn from(a: Attribute) -> Components { Components::new().a(a)} }
+impl From<Value> for Components { fn from(v: Value) -> Components { Components::new().v(v)} }
+
+impl From<(EntityId, Attribute, Value, TxId)> for Components {
+  fn from((e, a, v, t): (EntityId, Attribute, Value, TxId)) -> Self {
+    Components::new()
+      .e(e)
+      .a(a)
+      .v(v)
+      .t(t)
+  }
+}
+
+impl From<(Option<EntityId>, Option<Attribute>, Option<Value>, Option<TxId>)> for Components {
+  fn from((e, a, v, t): (Option<EntityId>, Option<Attribute>, Option<Value>, Option<TxId>)) -> Self {
+    Components { e: e, a: a, v: v, t: t }
   }
 }
 
@@ -385,7 +420,7 @@ pub trait Db: Sized {
 
   fn highest_eid(&self) -> EntityId {
     // TODO: Use Index's impl
-    let n = self.datoms(Index::Eavt(None, None, None, None)).unwrap() // TODO
+    let n = self.datoms(Index::Eavt, Components::empty()).unwrap() // TODO
       .into_iter()
       .last()
       .map(|datom| datom.entity.0)
@@ -462,10 +497,10 @@ pub trait Db: Sized {
     })
   }
 
-  fn datoms<'a>(&'a self, index: Index) -> Result<Datoms<'a>, Error>;
+  fn datoms<'a, CS: Into<Components>>(&'a self, index: Index, components: CS) -> Result<Datoms<'a>, Error>;
 
   fn entity<'a>(&'a self, entity: EntityId) -> Result<Entity<'a, Self>, Error> {
-    let datoms = self.datoms(Index::Eavt(Some(entity), None, None, None))?;
+    let datoms = self.datoms(Index::Eavt, entity)?;
     let mut attrs: BTreeMap<Attribute, BTreeSet<&Datom>> = BTreeMap::new();
 
     for d in datoms.iter() {
@@ -517,13 +552,15 @@ pub trait Db: Sized {
   }
 
   fn attribute(&self, attribute_name: &str) -> Option<Attribute> {
-    self.datoms(Index::Avet(Some(attr::ident), Some(Value::Str(attribute_name.into())), None, None)).unwrap()
+    self.datoms(Index::Avet,
+                Components::empty().a(attr::ident).v(Value::Str(attribute_name.into())))
+      .unwrap()
       .iter().next()
       .map(|d| Attribute::new(d.entity))
   }
 
   fn attribute_name<'a>(&'a self, attribute: Attribute) -> Option<String> {
-    self.datoms(Index::Avet(Some(attr::ident), None, Some(attribute.0) , None)).unwrap() // TODO
+    self.datoms(Index::Avet, Components::empty().e(attribute.0).a(attr::ident)).unwrap()
       .into_iter()
       .next()
       .and_then(|d| match d.value {

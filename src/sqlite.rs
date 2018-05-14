@@ -127,23 +127,22 @@ impl Db for SqliteDb {
     EntityId(std::cmp::max(n, 1000))
   }
 
-  fn datoms<'a>(&'a self, index: Index) -> Result<Datoms, Error> {
-    let (e, a, v, t) = index.unwrap();
+  fn datoms<'a, CS: Into<Components>>(&'a self, index: Index, components: CS) -> Result<Datoms, Error> {
+    let (e, a, v, t) = components.into().eavt();
 
     let order_statement = match index {
-      Index::Eavt(_, _, _, _) => "order by datoms.e, datoms.a, datoms.v, datoms.t asc",
-      Index::Aevt(_, _, _, _) => "order by datoms.a, datoms.e, datoms.v, datoms.t asc",
-      Index::Avet(_, _, _, _) => "order by datoms.a, datoms.e, datoms.v, datoms.t asc",
+      Index::Eavt => "order by datoms.e, datoms.a, datoms.v, datoms.t asc",
+      Index::Aevt => "order by datoms.a, datoms.e, datoms.v, datoms.t asc",
+      Index::Avet => "order by datoms.a, datoms.e, datoms.v, datoms.t asc",
     };
 
     // Limit results to attributes in `unique_attributes`
     let additional_where_clauses = match index {
-      // Index::Avet(_, _, _, _) => "and a in (select e from unique_attributes where e = datoms.a)",
       _ => ""
     };
 
     let join_clause = match index {
-      Index::Avet(_, _, _, _) => "join unique_attributes on unique_attributes.e = datoms.a",
+      Index::Avet => "join unique_attributes on unique_attributes.e = datoms.a",
       _ => ""
     };
 
@@ -184,10 +183,10 @@ impl Db for SqliteDb {
                                    &attribute_query_input,
                                    &value_query_input,
                                    &tx_query_input], |row| {
-      let e = EntityId(row.get(0));
-      let a = Attribute::new(EntityId(row.get(1)));
+      let e        = EntityId(row.get(0));
+      let a        = Attribute::new(EntityId(row.get(1)));
       let v: Value = row.get(2);
-      let t: TxId = row.get(3);
+      let t: TxId  = row.get(3);
       (e, a, v, t)
     })?.map(|r| r.unwrap())
       .map(|(e, a, v, tx)| Datom {
