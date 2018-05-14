@@ -19,14 +19,6 @@ impl Db for TestDb {
     Ok(())
   }
 
-  // fn transact(&mut self, facts: &[Fact]) -> TxId {
-  //   for fact in facts {
-  //     println!("Handling {:?}", fact);
-  //   }
-      
-  //   unimplemented!("TestDb::transact")
-  // }
-
   #[cfg(test)]
   fn all_datoms<'a>(&'a self) -> Datoms<'a> {
     let mut datoms = self.0.clone();
@@ -34,7 +26,7 @@ impl Db for TestDb {
     datoms
   }
 
-  fn datoms<I: Into<Index>>(&self, index: I) -> Result<Datoms, Error> {
+  fn datoms<I: Into<FilteredIndex>>(&self, index: I) -> Result<Datoms, Error> {
     let index = index.into();
     
     let mut raw_datoms = self.0.clone();
@@ -94,7 +86,7 @@ impl Db for TestDb {
       .filter(|d| {
         // Handle special-case for AVET index (which only contains indexed datoms)
         match index.index {
-          IndexType::Avet => indexed_attributes.contains(&d.attribute),
+          Index::Avet => indexed_attributes.contains(&d.attribute),
           _ => true
         }
       })
@@ -110,9 +102,9 @@ impl Db for TestDb {
       }
 
       match index.index {
-        IndexType::Eavt => cmp!(entity, attribute, value, tx),
-        IndexType::Aevt => cmp!(attribute, entity, value, tx),
-        IndexType::Avet => cmp!(attribute, value, entity, tx),
+        Index::Eavt => cmp!(entity, attribute, value, tx),
+        Index::Aevt => cmp!(attribute, entity, value, tx),
+        Index::Avet => cmp!(attribute, value, entity, tx),
       }
     });
 

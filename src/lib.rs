@@ -220,13 +220,13 @@ impl<'a, D: Db> ops::Index<&'a str> for Entity<'a, D> {
 pub type Datoms<'a> = Vec<Datom>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IndexType {
+pub enum Index {
   Eavt,
   Aevt,
-  Avet
+  Avet,
 }
 
-impl IndexType {
+impl Index {
   // pub fn matches(&self, components: &Components, datom: &Datom) -> bool {
   //   let e = components.e;
   //   let a = components.a;
@@ -241,15 +241,15 @@ impl IndexType {
   //   return e && a && v && t;;
   // }
 
-  pub fn e(self, e: EntityId)  -> Index { Index::new(self).e(e) }
-  pub fn a(self, a: Attribute) -> Index { Index::new(self).a(a) }
-  pub fn v(self, v: Value)     -> Index { Index::new(self).v(v) }
-  pub fn t(self, t: TxId)      -> Index { Index::new(self).t(t) }
+  pub fn e(self, e: EntityId)  -> FilteredIndex { FilteredIndex::new(self).e(e) }
+  pub fn a(self, a: Attribute) -> FilteredIndex { FilteredIndex::new(self).a(a) }
+  pub fn v(self, v: Value)     -> FilteredIndex { FilteredIndex::new(self).v(v) }
+  pub fn t(self, t: TxId)      -> FilteredIndex { FilteredIndex::new(self).t(t) }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Index {
-  index: IndexType,
+pub struct FilteredIndex {
+  index: Index,
   
   e: Option<EntityId>,
   a: Option<Attribute>,
@@ -257,8 +257,8 @@ pub struct Index {
   t: Option<TxId>,
 }
 
-impl Index {
-  pub fn new(index: IndexType) -> Self {
+impl FilteredIndex {
+  pub fn new(index: Index) -> Self {
     Self { index: index, e: None, a: None, v: None, t: None }
   }
   
@@ -286,9 +286,9 @@ impl Index {
   }
 }
 
-impl From<IndexType> for Index {
-  fn from(i: IndexType) -> Self {
-    Index::new(i)
+impl From<Index> for FilteredIndex {
+  fn from(i: Index) -> Self {
+    FilteredIndex::new(i)
   }
 }
 
@@ -425,8 +425,8 @@ pub trait Db: Sized {
   fn all_datoms<'a>(&'a self) -> Datoms<'a>;
 
   fn highest_eid(&self) -> EntityId {
-    // TODO: Use Index's impl
-    let n = self.datoms(IndexType::Eavt).unwrap() // TODO
+    // TODO: Use FilteredIndex's impl
+    let n = self.datoms(Index::Eavt).unwrap() // TODO
       .into_iter()
       .last()
       .map(|datom| datom.entity.0)
@@ -503,10 +503,10 @@ pub trait Db: Sized {
     })
   }
 
-  fn datoms<'a, I: Into<Index>>(&'a self, index: I) -> Result<Datoms<'a>, Error>;
+  fn datoms<'a, I: Into<FilteredIndex>>(&'a self, index: I) -> Result<Datoms<'a>, Error>;
 
   fn entity<'a>(&'a self, entity: EntityId) -> Result<Entity<'a, Self>, Error> {
-    let datoms = self.datoms(IndexType::Eavt.e(entity))?;
+    let datoms = self.datoms(Index::Eavt.e(entity))?;
     let mut attrs: BTreeMap<Attribute, BTreeSet<&Datom>> = BTreeMap::new();
 
     for d in datoms.iter() {
@@ -558,14 +558,14 @@ pub trait Db: Sized {
   }
 
   fn attribute(&self, attribute_name: &str) -> Option<Attribute> {
-    self.datoms(IndexType::Avet.a(attr::ident).v(Value::Str(attribute_name.into())))
+    self.datoms(Index::Avet.a(attr::ident).v(Value::Str(attribute_name.into())))
       .unwrap()
       .iter().next()
       .map(|d| Attribute::new(d.entity))
   }
 
   fn attribute_name<'a>(&'a self, attribute: Attribute) -> Option<String> {
-    self.datoms(IndexType::Avet.e(attribute.0).a(attr::ident)).unwrap()
+    self.datoms(Index::Avet.e(attribute.0).a(attr::ident)).unwrap()
       .into_iter()
       .next()
       .and_then(|d| match d.value {
