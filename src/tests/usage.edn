@@ -1,0 +1,2 @@
+{:tx [[:db/assert 1000 :db/ident "usage/test"]]
+ :entities [{1000 {:db/ident "usage/test"}}]}

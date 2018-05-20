@@ -9,7 +9,7 @@ pub fn validate_datoms(datoms: &[Datom]) {
       .or_insert_with(|| BTreeSet::new());
 
     match d.status {
-      Status::Added => {
+      Status::Asserted => {
         entry.insert(&d.value);
       },
       Status::Retracted(_) => {
@@ -37,7 +37,7 @@ fn test_invalid_datom_set() {
   let mut datoms = tests::data::make_test_data();
 
   // Clone last added datom, make it a retraction, change its value
-  let mut retraction = datoms.iter().filter(|d| d.status == Status::Added).last().unwrap().clone();
+  let mut retraction = datoms.iter().filter(|d| d.status == Status::Asserted).last().unwrap().clone();
   retraction.status = Status::Retracted(retraction.tx);
   retraction.value = Value::Str("xxxxxxxxxx".into());
   datoms.push(retraction);
@@ -53,7 +53,7 @@ pub fn test_components() {
     attribute: Attribute::new(EntityId(1)),
     value:     Value::Int(23),
     tx:        EntityId(10),
-    status:    Status::Added,
+    status:    Status::Asserted,
   };
 
   assert_eq!(true, Components(None, None, None, None).matches(&d));

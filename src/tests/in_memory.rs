@@ -67,7 +67,7 @@ impl Db for TestDb {
     for d in raw_datoms.into_iter() {
       let d = EavEquality(d);
       match d.0.status {
-        Status::Added => {
+        Status::Asserted => {
           datoms.insert(d);
         },
         Status::Retracted(_) if datoms.contains(&d) => {

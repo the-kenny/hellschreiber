@@ -102,7 +102,7 @@ impl Db for SqliteDb {
       assert!(d.status.is_retraction());
 
       let mut added = d.clone();
-      added.status = Status::Added;
+      added.status = Status::Asserted;
 
       let mut retracted = d.clone();
       retracted.tx = match retracted.status {
@@ -195,7 +195,7 @@ impl Db for SqliteDb {
         attribute: a,
         value: v,
         tx: tx,
-        status: Status::Added,
+        status: Status::Asserted,
       })
       .collect::<Vec<_>>();
 
@@ -258,7 +258,7 @@ mod type_impls {
   impl types::FromSql for Status {
     fn column_result(value: types::ValueRef) -> FromSqlResult<Self> {
       match value {
-        ValueRef::Null        => Ok(Status::Added),
+        ValueRef::Null        => Ok(Status::Asserted),
         ValueRef::Integer(tx) => Ok(Status::Retracted(EntityId(tx))),
         _                     => unreachable!()
       }
@@ -268,7 +268,7 @@ mod type_impls {
   impl types::ToSql for Status {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput> {
       match *self {
-        Status::Added => Ok(types::Null.into()),
+        Status::Asserted => Ok(types::Null.into()),
         Status::Retracted(EntityId(tx)) => Ok(tx.into()),
       }
     }

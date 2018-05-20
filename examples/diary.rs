@@ -5,6 +5,7 @@ use hellschreiber::*;
 
 use std::io::{BufRead, BufReader};
 
+#[allow(unused)]
 struct DiaryEntry {
   eid: EntityId,
   date: chrono::DateTime<chrono::Utc>,
