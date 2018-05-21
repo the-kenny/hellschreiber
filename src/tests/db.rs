@@ -248,8 +248,8 @@ pub fn test_transact_unknown_attribute_error<D: Db>(mut db: D) {
 
 pub fn test_entity_index_trait<D: Db>(db: D) {
   let entity = db.entity(attr::ident.0).unwrap();
-  assert_eq!(false, entity["db/ident"].is_empty());
-  assert_eq!(true,  entity["unknown/attribute"].is_empty());
+  assert_eq!(false, entity.get("db/ident").is_none());
+  assert_eq!(true,  entity.get("unknown/attribute").is_none());
 }
 
 pub fn test_avet_index<D: Db>(mut db: D) {

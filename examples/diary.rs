@@ -16,8 +16,8 @@ impl<'a, D: Db> From<Entity<'a, D>> for DiaryEntry {
   fn from(o: Entity<'a, D>) -> DiaryEntry {
     DiaryEntry {
       eid: o.eid,
-      date: o["diary.entry/date"][0].as_datetime().unwrap(),
-      text: o["diary.entry/text"][0].as_string().unwrap(),
+      date: o.get("diary.entry/date").unwrap().as_datetime().unwrap(),
+      text: o.get("diary.entry/text").unwrap().as_string().unwrap(),
     }
   }
 }

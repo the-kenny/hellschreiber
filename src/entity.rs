@@ -1,4 +1,4 @@
-use super::{Db, EntityId, Attribute, Value};
+use super::{Db, EntityId, Attribute, Value, ToAttribute};
 
 use std::{fmt, ops};
 use std::collections::BTreeMap;
@@ -8,6 +8,19 @@ pub struct Entity<'a, D: Db + 'a> {
   pub db: &'a D,
   pub eid: EntityId,
   pub values: BTreeMap<Attribute, Vec<Value>>,
+}
+
+impl<'a, D: Db> Entity<'a, D> {
+  pub fn get<A: ToAttribute>(&'a self, attribute: A) -> Option<&'a Value> {
+    self.get_many(attribute).next()
+  }
+
+  pub fn get_many<A: ToAttribute>(&'a self, attribute: A) -> impl Iterator<Item=&Value> {
+    attribute.to_attribute(self.db)
+      .and_then(|attribute| self.values.get(&attribute))
+      .map(|x| x.iter())
+      .unwrap_or(EMPTY_VEC.iter())
+  }
 }
 
 impl<'a, D: Db> fmt::Debug for Entity<'a, D> {
@@ -39,15 +52,8 @@ impl<'a, D: Db> ops::Index<&'a str> for &'a Entity<'a, D> {
 
 // TODO: Get rid of duplication
 impl<'a, D: Db> ops::Index<&'a str> for Entity<'a, D> {
-  type Output = Vec<Value>;
+  type Output = Value;
   fn index(&self, idx: &'a str) -> &Self::Output {
-    if idx == "db/id" {
-      unimplemented!("Value::Ref or Value::Eid")
-    } else {
-      self.db.attribute(idx)
-        .and_then(|attr_id| self.values.get(&attr_id))
-        .unwrap_or(&EMPTY_VEC)
-    }
+    self.get(idx).unwrap()
   }
 }
-
