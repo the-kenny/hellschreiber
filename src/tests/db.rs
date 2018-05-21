@@ -269,9 +269,16 @@ pub fn test_avet_index<D: Db>(mut db: D) {
   }
 }
 
-/*
-pub fn test_ref_follow<D: Db>(db: D) {
-  let entity = db.entity(attr::ident.0);
+pub fn test_repeated_assertions<D: Db>(mut db: D) {
+  let tid = db.tempid();
+  let txd = db.transact(&[(Assert, tid, "db/ident", Value::Int(42)),
+                          (Assert, tid, "db/ident", Value::Int(42)),
+                          (Assert, tid, "db/ident", Value::Int(23)),
+                          (Assert, tid, "db/ident", Value::Int(42))]).unwrap();
 
+  use std::collections::BTreeSet;
+
+  let entity = db.entity(txd.tempid_mappings[&tid]).unwrap();
+  assert_eq!(entity.get_many("db/ident").collect::<BTreeSet<_>>(),
+             BTreeSet::from_iter(vec![&Value::Int(42), &Value::Int(23)]));
 }
-*/

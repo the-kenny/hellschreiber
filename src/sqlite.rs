@@ -206,6 +206,11 @@ impl Db for SqliteDb {
     let tx = self.conn.transaction()?;
 
     {
+      // A single transaction can assert and retract the same value so
+      // we have to persist all assertions before doing any
+      // retractions as our implementation will set the `retracted_tx`
+      // attribute on the database row.
+
       let (asserted, retracted): (Vec<&Datom>, Vec<&Datom>) = datoms.iter()
         .partition(|d| d.status.is_assertion());
 

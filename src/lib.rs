@@ -321,6 +321,7 @@ mod tests {
         #[test] fn test_highest_eid() { super::db::test_highest_eid($t) }
         #[test] fn test_transact_unknown_attribute_error() { super::db::test_transact_unknown_attribute_error($t) }
         #[test] fn test_avet_index() { super::db::test_avet_index($t); }
+        #[test] fn test_repeated_assertions() { super::db::test_repeated_assertions($t); }
 
         #[test] fn test_entity_index_trait() { super::db::test_entity_index_trait($t) }
 
