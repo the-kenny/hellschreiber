@@ -3,6 +3,7 @@ use chrono;
 
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Serialize, Deserialize, From)]
 pub enum Value {
+  Bool(bool),
   Str(String),
   Int(i64),
   Ref(EntityId),

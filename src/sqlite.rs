@@ -134,7 +134,7 @@ impl Db for SqliteDb {
     let order_statement = match index.index {
       Index::Eavt => "order by datoms.e, datoms.a, datoms.v, datoms.t asc",
       Index::Aevt => "order by datoms.a, datoms.e, datoms.v, datoms.t asc",
-      Index::Avet => "order by datoms.a, datoms.e, datoms.v, datoms.t asc",
+      Index::Avet => "order by datoms.a, datoms.v, datoms.e, datoms.t asc",
     };
 
     // Limit results to attributes in `unique_attributes`
@@ -226,11 +226,18 @@ impl Db for SqliteDb {
                          &d.tx.0])?;
       }
 
+      // To retract we set the `retracted_tx` column on our datom. We
+      // have to make sure we aren't updating any datoms from our
+      // current transactions which were inserted earlier, so we
+      // explicitly check for `datoms.t != d.tx`. This must affect
+      // exactly one single row. If an UPDATE affects multiple rows we
+      // just panic to bail out.
       let mut retract = tx.prepare_cached(
         "update datoms set retracted_tx = ?1
          where e = ?2
            and a = ?3
-           and v = ?4"
+           and v = ?4
+           and t != ?5"
       ).unwrap();
 
 
@@ -241,10 +248,14 @@ impl Db for SqliteDb {
           _ => unreachable!()
         };
 
-        retract.execute(&[&retracted_tx.0,
-                          &d.entity.0,
-                          &d.attribute.0,
-                          &d.value])?;
+        let row_count = retract.execute(&[&retracted_tx.0,
+                                          &d.entity.0,
+                                          &d.attribute.0,
+                                          &d.value,
+                                          &d.tx])?;
+        if row_count != 1 {
+          panic!("UPDATE to change datoms.retracted_tx affected more than one row. Datom: {:?}", d);
+        }
       }
     }
 

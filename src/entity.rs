@@ -29,7 +29,10 @@ impl<'a, D: Db> fmt::Debug for Entity<'a, D> {
       .map(|(attr, value)| (self.db.attribute_name(*attr).unwrap(), value))
       .collect();
 
-    write!(f, "<Entity {:?} {:?}>", self.eid, pretty_values)
+    f.debug_struct("Entity")
+      .field("eid", &self.eid)
+      .field("values", &pretty_values)
+      .finish()
   }
 }
 
@@ -63,24 +66,34 @@ mod tests {
   use ::*;
   use ::SqliteDb;
 
-  const ONE: EntityId = EntityId(1000);
-  const TWO: EntityId = EntityId(1001);
+  const ONE: EntityId = EntityId(101010);
+  const TWO: EntityId = EntityId(101011);
 
   fn test_db() -> impl Db {
     let mut db = SqliteDb::new().unwrap();
-    db.transact(&[(Assert, ONE, "db/ident", Value::Str("foo".to_string()))]).unwrap();
-    db.transact(&[(Assert, TWO, "db/ident", Value::Str("bar".to_string()))]).unwrap();
-    db.transact(&[(Assert, TWO, "db/ident", Value::Str("baz".to_string()))]).unwrap();
+    let foo_bar = db.tempid();
+    let schema_tx = &[(Assert, foo_bar, "db/ident", Value::Str("foo/bar".into())),
+                      (Assert, foo_bar, "db.cardinality/many", true.into())];
+    db.transact(schema_tx).unwrap();
+
+    db.transact(&[(Assert, ONE, "foo/bar", Value::Str("foo".to_string()))]).unwrap();
+    db.transact(&[(Assert, TWO, "foo/bar", Value::Str("bar".to_string()))]).unwrap();
+    db.transact(&[(Assert, TWO, "foo/bar", Value::Str("baz".to_string()))]).unwrap();
     db
   }
 
   #[test]
   fn get() {
     let db = test_db();
-    assert_eq!(db.entity(ONE).unwrap().get("db/ident"),
-               Some(&Value::Str("foo".to_string())));
-    assert_eq!(db.entity(TWO).unwrap().get("db/ident"),
-                 Some(&Value::Str("bar".to_string())))
+    assert_eq!(db.entity(ONE).unwrap().get("foo/bar").unwrap(),
+               &Value::Str("foo".to_string()));
+
+    // Entity::get() on a db.cardinality/many value is undefined, so
+    // here it might either return "bar" or "baz"
+
+    let two = db.entity(TWO).unwrap();
+    let value = two.get("foo/bar");
+    assert!(vec![Value::Str("bar".into()), Value::Str("baz".into())].contains(value.unwrap()));
   }
 
   #[test]
@@ -88,11 +101,11 @@ mod tests {
     let db = test_db();
 
     let one = db.entity(ONE).unwrap();
-    assert_eq!(one.get_many("db/ident").collect::<Vec<_>>(),
+    assert_eq!(one.get_many("foo/bar").collect::<Vec<_>>(),
                vec![&Value::Str("foo".to_string())]);
 
     let two = db.entity(TWO).unwrap();
-    assert_eq!(two.get_many("db/ident").collect::<Vec<_>>(),
+    assert_eq!(two.get_many("foo/bar").collect::<Vec<_>>(),
                vec![&Value::Str("bar".to_string()),
                     &Value::Str("baz".to_string())]);
   }
@@ -100,11 +113,12 @@ mod tests {
   #[test]
   fn index() {
     let db = test_db();
-    assert_eq!(db.entity(ONE).unwrap()["db/ident"],
+    assert_eq!(db.entity(ONE).unwrap()["foo/bar"],
                Value::Str("foo".to_string()));
 
-    assert_eq!(db.entity(TWO).unwrap()["db/ident"],
-               Value::Str("bar".to_string()));
+    let two = db.entity(TWO).unwrap();
+    let value = two.get("foo/bar");
+    assert!(vec![Value::Str("bar".into()), Value::Str("baz".into())].contains(value.unwrap()));
   }
 
   #[test]

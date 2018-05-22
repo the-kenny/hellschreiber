@@ -233,17 +233,8 @@ pub fn test_highest_eid<D: Db>(mut db: D) {
   assert_eq!(db.highest_eid(), EntityId(1000));
 
   db.transact(&[(Assert, TempId(42), attr::ident, "foo/bar")]).unwrap();
-  assert_eq!(db.highest_eid(), EntityId(1001));
-}
-
-pub fn test_transact_unknown_attribute_error<D: Db>(mut db: D) {
-  let a = Attribute(db.highest_eid());
-  let tx = [(Assert, TempId(42), a, "xx")];
-
-  let error = db.transact(&tx).unwrap_err();
-
-  let transaction_error = error.downcast::<TransactionError>().unwrap();
-  assert_eq!(TransactionError::NonIdentAttributeTransacted(a), transaction_error);
+  // Two IDs are generated: One for the Transaction, one for our new ident
+  assert_eq!(db.highest_eid(), EntityId(1002));
 }
 
 pub fn test_entity_index_trait<D: Db>(db: D) {
@@ -270,15 +261,68 @@ pub fn test_avet_index<D: Db>(mut db: D) {
 }
 
 pub fn test_repeated_assertions<D: Db>(mut db: D) {
+  let attr_tid = db.tempid();
+  db.transact(&[(Assert, attr_tid, "db/ident", Value::Str("foo/bar".into())),
+                (Assert, attr_tid, "db.cardinality/many", Value::Bool(true))]).unwrap();
+
   let tid = db.tempid();
-  let txd = db.transact(&[(Assert, tid, "db/ident", Value::Int(42)),
-                          (Assert, tid, "db/ident", Value::Int(42)),
-                          (Assert, tid, "db/ident", Value::Int(23)),
-                          (Assert, tid, "db/ident", Value::Int(42))]).unwrap();
+  let txd = db.transact(&[(Assert, tid, "foo/bar", Value::Int(42)),
+                          (Assert, tid, "foo/bar", Value::Int(42)),
+                          (Assert, tid, "foo/bar", Value::Int(23)),
+                          (Assert, tid, "foo/bar", Value::Int(42))]).unwrap();
 
   use std::collections::BTreeSet;
 
   let entity = db.entity(txd.tempid_mappings[&tid]).unwrap();
-  assert_eq!(entity.get_many("db/ident").collect::<BTreeSet<_>>(),
+  assert_eq!(entity.get_many("foo/bar").collect::<BTreeSet<_>>(),
              BTreeSet::from_iter(vec![&Value::Int(42), &Value::Int(23)]));
+}
+
+// Default case: cardinality_many is false
+pub fn test_non_cardinality_many<D: Db>(mut db: D) {
+  db.transact(&[(Assert, TempId(100), "db/ident", Value::Str("foo/bar".into()))]).unwrap();
+
+  let eid = EntityId(1000);
+  db.transact(&[(Assert, eid, "foo/bar", Value::Int(23))]).unwrap();
+  db.transact(&[(Assert, eid, "foo/bar", Value::Int(42))]).unwrap();
+
+  let entity = db.entity(eid).unwrap();
+  assert_eq!(entity.get_many("foo/bar").count(), 1);
+}
+
+// Cardinality_many true
+pub fn test_cardinality_many<D: Db>(mut db: D) {
+  let attr_tid = db.tempid();
+  db.transact(&[(Assert, attr_tid, "db/ident", Value::Str("foo/bar".into())),
+                (Assert, attr_tid, "db.cardinality/many", Value::Bool(true))]).unwrap();
+
+  let eid = EntityId(1000);
+  db.transact(&[(Assert, eid, "foo/bar", Value::Int(23))]).unwrap();
+  db.transact(&[(Assert, eid, "foo/bar", Value::Int(42))]).unwrap();
+
+  let entity = db.entity(eid).unwrap();
+  assert_eq!(entity.get_many("foo/bar").count(), 2);
+  assert_eq!(entity.get_many("foo/bar").collect::<BTreeSet<_>>(),
+             BTreeSet::from_iter(vec![&Value::Int(42), &Value::Int(23)]));
+}
+
+pub fn test_error_changing_ident_attribute<D: Db>(mut db: D) {
+  let attr = EntityId(101010);
+  db.transact(&[(Assert, attr, "db/ident", "foo/bar")]).unwrap();
+
+  // Transacting the same ident is fine
+  assert!(db.transact(&[(Assert, attr, "db/ident", "foo/bar")]).is_ok());
+
+  // Changing the ident is an error
+  let error = db.transact(&[(Assert, attr, "db/ident", "some.new/ident")]).unwrap_err();
+  assert_eq!(TransactionError::ChangingIdentAttribute("foo/bar".into(), "some.new/ident".into()),
+             error.downcast::<TransactionError>().unwrap());
+}
+
+pub fn test_error_non_ident_attribute_transacted<D: Db>(mut db: D) {
+  let tx = &[(Assert, db.tempid(), "foo/bar", Value::Int(42))];
+  let error = db.transact(tx).unwrap_err();
+
+  let transaction_error = error.downcast::<TransactionError>().unwrap();
+  assert_eq!(TransactionError::NonIdentAttributeTransacted, transaction_error);
 }

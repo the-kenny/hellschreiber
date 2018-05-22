@@ -30,7 +30,7 @@ use std::sync::atomic;
 use std::iter::FromIterator;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct EntityId(i64);
+pub struct EntityId(pub i64);
 
 pub type TxId = EntityId;
 
@@ -94,17 +94,19 @@ pub type Datoms<'a> = Vec<Datom>;
 pub(crate) mod attr {
   #![allow(non_upper_case_globals)]
   use super::{Attribute, EntityId};
-  pub const id:         Attribute = Attribute(EntityId(10));
-  pub const ident:      Attribute = Attribute(EntityId(11));
-  pub const doc:        Attribute = Attribute(EntityId(12));
-  pub const tx_instant: Attribute = Attribute(EntityId(13));
+  pub const id:               Attribute = Attribute(EntityId(10));
+  pub const ident:            Attribute = Attribute(EntityId(11));
+  pub const doc:              Attribute = Attribute(EntityId(12));
+  pub const tx_instant:       Attribute = Attribute(EntityId(13));
+  pub const cardinality_many: Attribute = Attribute(EntityId(14));
 }
 
 fn seed_datoms() -> Datoms<'static> {
-  let datoms = [(attr::id,         "db/id"),
-                (attr::ident,      "db/ident"),
-                (attr::doc,        "db/doc"),
-                (attr::tx_instant, "db/tx_instant"),
+  let datoms = [(attr::id,               "db/id"),
+                (attr::ident,            "db/ident"),
+                (attr::doc,              "db/doc"),
+                (attr::tx_instant,       "db/tx_instant"),
+                (attr::cardinality_many, "db.cardinality/many"),
   ].iter().
     map(|(attr, ident)| {
       Datom {
@@ -125,10 +127,14 @@ pub struct TransactionData {
   pub tempid_mappings: BTreeMap<TempId, EntityId>
 }
 
+// TODO: Use `String` to describe the attributes
 #[derive(Debug, Fail, PartialEq, Eq)]
 pub enum TransactionError {
-  #[fail(display = "Tried to transact fact for attribute {:?} without db/ident", _0)]
-  NonIdentAttributeTransacted(Attribute),
+  #[fail(display = "Tried to transact fact for attribute without db/ident")]
+  NonIdentAttributeTransacted,
+  #[fail(display = "Tried to transact new value ({}) for existing db/ident attribute {}", _0, _1)]
+  ChangingIdentAttribute(String, String),
+  // TODO: Error for setting db.cardinality/many on db/ident
 }
 
 lazy_static! {
@@ -158,19 +164,22 @@ pub trait Db: Sized {
 
 
   fn transact<O: ToOperation, I: IntoIterator<Item=O>>(&mut self, tx: I) -> Result<TransactionData, Error> {
-    let tx_eid = self.highest_eid();
+    let tx_eid = EntityId(self.highest_eid().0 + 1);
 
     let now = chrono::Utc::now();
 
     let mut datoms = vec![Datom {
-      entity: tx_eid,
+      entity:    tx_eid,
       attribute: attr::tx_instant,
-      value: Value::DateTime(now),
-      tx: tx_eid,
-      status: Status::Asserted
+      value:     Value::DateTime(now),
+      tx:        tx_eid,
+      status:    Status::Asserted
     }];
 
-    let tx: Vec<Operation> = tx.into_iter().map(|op| op.to_operation(self)).collect();
+    let tx = tx.into_iter()
+      .map(|op| op.to_operation(self))
+      .map(|op| op.map_err(|_| TransactionError::NonIdentAttributeTransacted))
+      .collect::<Result<Vec<Operation>, TransactionError>>()?;
 
     datoms.reserve(tx.len());
 
@@ -178,8 +187,8 @@ pub trait Db: Sized {
       let mut eids = BTreeMap::new();
       let mut highest_eid = tx_eid.0;
       for operation in tx.iter() {
-        if let &Operation::TempidAssertion(e, _, _) = operation {
-          eids.entry(e)
+        if let &Operation::TempidAssertion(tempid, _, _) = operation {
+          eids.entry(tempid)
             .or_insert_with(|| {
               highest_eid += 1;
               EntityId(highest_eid)
@@ -197,7 +206,48 @@ pub trait Db: Sized {
       };
 
       if !self.attribute_name(a).is_some() {
-        return Err(TransactionError::NonIdentAttributeTransacted(a).into())
+        return Err(TransactionError::NonIdentAttributeTransacted.into())
+      }
+
+      // If the operation is an assertion we have to handle the following things:
+      //
+      // - If the datom isn't db.cardinality/many we have to generate a retraction for the previous value
+      // 
+      // - If the attribute of this datom is `db/ident` we have to make sure it isn't changing the schema
+      // 
+      if status == Status::Asserted {
+        if let Some(previous_datom) = self.datoms(Index::Eavt.e(e).a(a)).unwrap().iter().next() {
+          // Prevent database schema changes
+          if a == attr::ident && v != previous_datom.value {
+            let old_attribute_name = previous_datom.value.as_string().unwrap();
+            let new_attribute_name = v.as_string().unwrap();
+            return Err(TransactionError::ChangingIdentAttribute(old_attribute_name, new_attribute_name).into())
+          }
+          
+          // Handle db.cardinality/many 
+          let cardinality_many = self.entity(a.0)
+            .unwrap()
+            .get("db.cardinality/many")
+            .map(|v| match v {
+              // Treat every value except Bool(false) as truthy. Allows
+              // the user to assert any value for documentation or
+              // whatever.
+              Value::Bool(false) => false,
+              _                  => true
+            }).unwrap_or(false);
+
+          if !cardinality_many {
+            let retraction = Datom {
+              entity: e,
+              attribute: a,
+              value: previous_datom.value.clone(),
+              tx: tx_eid,
+              status: Status::Retracted(tx_eid)
+            };
+
+            datoms.push(retraction);
+          }
+        }
       }
 
       let datom = Datom {
@@ -238,7 +288,7 @@ pub trait Db: Sized {
           entry.remove(&d);
         },
         Status::Retracted(_) => {
-          unreachable!()
+          panic!("Got retraction for non-existing value. Retraction: {:?}", d)
         }
       }
     }
@@ -319,11 +369,14 @@ mod tests {
         #[test] fn test_metadata() { super::db::test_db_metadata($t) }
         #[test] fn test_string_attributes() { super::db::test_string_attributes($t) }
         #[test] fn test_highest_eid() { super::db::test_highest_eid($t) }
-        #[test] fn test_transact_unknown_attribute_error() { super::db::test_transact_unknown_attribute_error($t) }
         #[test] fn test_avet_index() { super::db::test_avet_index($t); }
         #[test] fn test_repeated_assertions() { super::db::test_repeated_assertions($t); }
+        #[test] fn test_non_cardinality_many() { super::db::test_non_cardinality_many($t); }
+        #[test] fn test_cardinality_many() { super::db::test_cardinality_many($t); }
 
         #[test] fn test_entity_index_trait() { super::db::test_entity_index_trait($t) }
+        #[test] fn test_error_changing_ident_attribute() { super::db::test_error_changing_ident_attribute($t) }
+        #[test] fn test_error_non_ident_attribute_transacted() { super::db::test_error_non_ident_attribute_transacted($t) }
 
         #[test] fn test_usage_001() { super::usage::test_usage_001($t) }
       }

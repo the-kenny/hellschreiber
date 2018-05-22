@@ -1,6 +1,7 @@
 use ::*;
 
-#[derive(Debug)]
+use std::fmt;
+
 #[allow(unused)]
 pub struct TestDb(Vec<Datom>);
 
@@ -27,12 +28,6 @@ impl Db for TestDb {
   }
 
   fn datoms<I: Into<FilteredIndex>>(&self, index: I) -> Result<Datoms, Error> {
-    let index = index.into();
-    
-    let mut raw_datoms = self.0.clone();
-    raw_datoms.retain(|d| index.matches(&d));
-    raw_datoms.sort_by_key(|d| d.tx);
-
     #[derive(Debug)]
     struct EavEquality(Datom);
 
@@ -45,6 +40,7 @@ impl Db for TestDb {
           && lhs.value == rhs.value
       }
     }
+
     impl Eq for EavEquality {}
 
     use std::cmp;
@@ -64,7 +60,10 @@ impl Db for TestDb {
     use std::collections::BTreeSet;
     let mut datoms: BTreeSet<EavEquality> = Default::default();
 
-    for d in raw_datoms.into_iter() {
+    let mut datoms_by_tx = self.0.clone();
+    datoms_by_tx.sort_by_key(|d| d.tx);
+
+    for d in datoms_by_tx {
       let d = EavEquality(d);
       match d.0.status {
         Status::Asserted => {
@@ -74,14 +73,16 @@ impl Db for TestDb {
           datoms.remove(&d);
         },
         Status::Retracted(_) => {
-          unreachable!("Tried to retract non-existing datum: {:?} (have: {:?})", d.0, datoms)
+          unreachable!("Tried to retract non-existing datum: {:#?} (datoms: {:#?})", d.0, datoms)
         }
       }
     }
 
+    let index = index.into();
     let indexed_attributes = self.indexed_attributes();
 
     let mut datoms = datoms.into_iter()
+      .filter(|d| index.matches(&d.0))
       .map(|EavEquality(d)| d)
       .filter(|d| {
         // Handle special-case for AVET index (which only contains indexed datoms)
@@ -109,5 +110,13 @@ impl Db for TestDb {
     });
 
     Ok(datoms)
+  }
+}
+
+impl fmt::Debug for TestDb {
+  fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    f.debug_struct("TestDb")
+      .field("datoms", &self.0)
+      .finish()
   }
 }
