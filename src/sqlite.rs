@@ -30,11 +30,7 @@ impl SqliteDb {
   }
 
   fn has_sqlite_table(conn: &rusqlite::Connection, table: &str) -> Result<bool, rusqlite::Error> {
-    match conn.query_row("SELECT name FROM sqlite_master WHERE type='table' AND name=?1", &[&table], |_| true) {
-      Ok(b) => Ok(b),
-      Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
-      err => err
-    }
+    conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?1")?.exists(&[&table])
   }
 
   fn initialize(&mut self) -> Result<(), Error> {
