@@ -179,23 +179,18 @@ impl Db for SqliteDb {
                                    &attribute_query_input,
                                    &value_query_input,
                                    &tx_query_input], |row| {
-      let e        = EntityId(row.get(0));
-      let a        = Attribute::new(EntityId(row.get(1)));
-      let v: Value = row.get(2);
-      let t: TxId  = row.get(3);
-      (e, a, v, t)
-    })?.
-      map(|r| r.unwrap())
-      .map(|(e, a, v, tx)| Datom {
-        entity: e,
-        attribute: a,
-        value: v,
-        tx: tx,
-        status: Status::Asserted,
-      })
-      .collect::<Vec<_>>();
+      Datom {
+        entity:    EntityId(row.get(0)),
+        attribute: Attribute::new(EntityId(row.get(1))),
+        value:     row.get(2),
+        tx:        row.get(3),
+        status:    Status::Asserted,
+      }
+    })?
+    .map(|r| r.map_err(|e| e.into()))
+    .collect::<Result<Vec<_>, _>>();
 
-    Ok(datoms)
+    datoms
   }
 
   fn store_datoms(&mut self, datoms: &[Datom]) -> Result<(), Error> {
