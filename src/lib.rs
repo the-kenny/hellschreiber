@@ -141,6 +141,11 @@ lazy_static! {
   static ref LATEST_TEMPID: atomic::AtomicIsize  = 100.into();
 }
 
+pub fn tempid() -> TempId {
+  let i = LATEST_TEMPID.fetch_add(1, atomic::Ordering::SeqCst);
+  TempId(i as i64)
+}
+
 // TODO: Add `is_initialized?` and `initialize`
 pub trait Db: Sized {
   #[cfg(test)]
@@ -158,8 +163,7 @@ pub trait Db: Sized {
   }
 
   fn tempid(&mut self) -> TempId {
-    let i = LATEST_TEMPID.fetch_add(1, atomic::Ordering::SeqCst);
-    TempId(i as i64)
+    tempid()
   }
 
 
@@ -343,7 +347,7 @@ pub trait Db: Sized {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
   mod db;
   mod data;
   mod in_memory;
@@ -377,6 +381,7 @@ mod tests {
         #[test] fn test_entity_index_trait() { super::db::test_entity_index_trait($t) }
         #[test] fn test_error_changing_ident_attribute() { super::db::test_error_changing_ident_attribute($t) }
         #[test] fn test_error_non_ident_attribute_transacted() { super::db::test_error_non_ident_attribute_transacted($t) }
+        #[test] fn test_transact_same_value() { super::db::test_transact_same_value($t); }
 
         #[test] fn test_usage_001() { super::usage::test_usage_001($t) }
       }

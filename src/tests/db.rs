@@ -326,3 +326,16 @@ pub fn test_error_non_ident_attribute_transacted<D: Db>(mut db: D) {
   let transaction_error = error.downcast::<TransactionError>().unwrap();
   assert_eq!(TransactionError::NonIdentAttributeTransacted, transaction_error);
 }
+
+pub fn test_transact_same_value<D: Db>(mut db: D) {
+  db.transact(&[(Assert, tempid(), "db/ident", "foo/bar")]).unwrap();
+  let entity = *db.transact(&[(Assert, tempid(), "foo/bar", "TEST")]).unwrap()
+    .tempid_mappings
+    .values()
+    .next()
+    .unwrap();
+
+  for _ in 1..10 {
+    db.transact(&[(Assert, entity, "foo/bar", "ASDF")]).unwrap();
+  }
+}

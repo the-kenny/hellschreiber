@@ -137,11 +137,6 @@ impl Db for SqliteDb {
       Index::Avet => "order by datoms.a, datoms.v, datoms.e, datoms.t asc",
     };
 
-    // Limit results to attributes in `unique_attributes`
-    let additional_where_clauses = match index {
-      _ => ""
-    };
-
     let join_clause = match index.index {
       Index::Avet => "join unique_attributes on unique_attributes.e = datoms.a",
       _ => ""
@@ -157,7 +152,7 @@ impl Db for SqliteDb {
          and case when ?3 notnull then datoms.v == ?3 else 1 end
          and case when ?4 notnull then datoms.t == ?4 else 1 end
          {}
-       {}", join_clause, additional_where_clauses, order_statement))?;
+      ", join_clause, order_statement))?;
 
     let entity_query_input = match e {
       Some(EntityId(i)) => rusqlite::types::Value::Integer(i),
@@ -189,7 +184,8 @@ impl Db for SqliteDb {
       let v: Value = row.get(2);
       let t: TxId  = row.get(3);
       (e, a, v, t)
-    })?.map(|r| r.unwrap())
+    })?.
+      map(|r| r.unwrap())
       .map(|(e, a, v, tx)| Datom {
         entity: e,
         attribute: a,
@@ -237,7 +233,8 @@ impl Db for SqliteDb {
          where e = ?2
            and a = ?3
            and v = ?4
-           and t != ?5"
+           and t != ?5
+           and retracted_tx is null"
       ).unwrap();
 
 
