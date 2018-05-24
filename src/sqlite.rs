@@ -116,11 +116,18 @@ impl Db for SqliteDb {
     datoms
   }
 
-  fn highest_eid(&self) -> EntityId {
-    let n = self.conn.query_row("select max(e) from datoms", &[], |row| row.get(0))
+  fn highest_eid(&self, partition: Partition) -> EntityId {
+    let partition_mask = partition as i64;
+    let mut stmt = self.conn.prepare_cached(
+      "select coalesce(max(e), 0) from datoms
+       where e >= ?1
+         and (e & ?1) == ?1"
+    ).unwrap();
+
+    let n = stmt.query_row(&[&partition_mask], |row| row.get(0))
       .unwrap_or(0);
 
-    EntityId(std::cmp::max(n, 1000))
+    EntityId(std::cmp::max(n, partition as i64))
   }
 
   fn datoms<'a, I: Into<FilteredIndex>>(&'a self, index: I) -> Result<Datoms, Error> {

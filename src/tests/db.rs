@@ -230,11 +230,22 @@ pub fn test_string_attributes<D: Db>(mut db: D) {
 }
 
 pub fn test_highest_eid<D: Db>(mut db: D) {
-  assert_eq!(db.highest_eid(), EntityId(1000));
+  for &partition in &[Partition::Db, Partition::Tx, Partition::User] {
+    assert_eq!(db.highest_eid(partition).0 & partition as i64, partition as i64);
+  }
 
-  db.transact(&[(Assert, TempId(42), attr::ident, "foo/bar")]).unwrap();
-  // Two IDs are generated: One for the Transaction, one for our new ident
-  assert_eq!(db.highest_eid(), EntityId(1002));
+  // After the transaction of a new `db/ident` `highest_eid` should
+  // return a bigger value for the tx and the db but not for the user
+  // part.
+  let old_db = db.highest_eid(Partition::Db);
+  let old_tx = db.highest_eid(Partition::Tx);
+  let old_user = db.highest_eid(Partition::User);
+
+  db.transact(&[(Assert, tempid(), "db/ident", "foo/bar")]).unwrap();
+
+  assert_eq!(old_db.0 + 1, db.highest_eid(Partition::Db).0);
+  assert_eq!(old_tx.0 + 1, db.highest_eid(Partition::Tx).0);
+  assert_eq!(old_user, db.highest_eid(Partition::User));
 }
 
 pub fn test_entity_index_trait<D: Db>(db: D) {

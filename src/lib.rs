@@ -38,6 +38,17 @@ pub type TxId = EntityId;
 pub struct Attribute(EntityId);
 
 impl Attribute {
+  fn is_internal(&self) -> bool {
+    let x = *self;
+
+    x == attr::id
+      || x == attr::ident
+      || x == attr::doc
+      || x == attr::cardinality_many
+  }
+}
+
+impl Attribute {
   fn new(id: EntityId) -> Self {
     Attribute(id)
   }
@@ -146,29 +157,43 @@ pub fn tempid() -> TempId {
   TempId(i as i64)
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Partition {
+  Db   = 2 << 10,
+  Tx   = 2 << 32,
+  User = 2 << 48,
+}
+
+impl Partition {
+  fn contains(&self, eid: EntityId) -> bool {
+    let i = *self as i64;
+    (i & eid.0) == i
+  }
+}
+
 // TODO: Add `is_initialized?` and `initialize`
 pub trait Db: Sized {
   #[cfg(test)]
   fn all_datoms<'a>(&'a self) -> Datoms<'a>;
 
-  fn highest_eid(&self) -> EntityId {
+  fn highest_eid(&self, partition: Partition) -> EntityId {
     // TODO: Use FilteredIndex's impl
     let n = self.datoms(Index::Eavt).unwrap() // TODO
       .into_iter()
+      .filter(|d| partition.contains(d.entity))
       .last()
       .map(|datom| datom.entity.0)
       .unwrap_or(0);
 
-    EntityId(std::cmp::max(n, 1000))
+    EntityId(std::cmp::max(n, partition as i64))
   }
 
   fn tempid(&mut self) -> TempId {
     tempid()
   }
 
-
   fn transact<O: ToOperation, I: IntoIterator<Item=O>>(&mut self, tx: I) -> Result<TransactionData, Error> {
-    let tx_eid = EntityId(self.highest_eid().0 + 1);
+    let tx_eid = EntityId(self.highest_eid(Partition::Tx).0 + 1);
 
     let now = chrono::Utc::now();
 
@@ -189,13 +214,23 @@ pub trait Db: Sized {
 
     let eids = {
       let mut eids = BTreeMap::new();
-      let mut highest_eid = tx_eid.0;
+      let mut highest_eid = self.highest_eid(Partition::User).0;
+      let mut highest_db_eid = self.highest_eid(Partition::Db).0;
+
       for operation in tx.iter() {
-        if let &Operation::TempidAssertion(tempid, _, _) = operation {
+        if let &Operation::TempidAssertion(tempid, attribute, _) = operation {
           eids.entry(tempid)
             .or_insert_with(|| {
-              highest_eid += 1;
-              EntityId(highest_eid)
+              // If we're asserting an internal attribute (db/id,
+              // db/ident, db/doc, db.cardinality/many) we use the Db
+              // partition
+              if attribute.is_internal() {
+                highest_db_eid += 1;
+                EntityId(highest_db_eid)
+              } else {
+                highest_eid += 1;
+                EntityId(highest_eid)
+              }
             });
         }
       }
@@ -216,9 +251,9 @@ pub trait Db: Sized {
       // If the operation is an assertion we have to handle the following things:
       //
       // - If the datom isn't db.cardinality/many we have to generate a retraction for the previous value
-      // 
+      //
       // - If the attribute of this datom is `db/ident` we have to make sure it isn't changing the schema
-      // 
+      //
       if status == Status::Asserted {
         if let Some(previous_datom) = self.datoms(Index::Eavt.e(e).a(a)).unwrap().iter().next() {
           // Prevent database schema changes
@@ -227,8 +262,8 @@ pub trait Db: Sized {
             let new_attribute_name = v.as_string().unwrap();
             return Err(TransactionError::ChangingIdentAttribute(old_attribute_name, new_attribute_name).into())
           }
-          
-          // Handle db.cardinality/many 
+
+          // Handle db.cardinality/many
           let cardinality_many = self.entity(a.0)
             .unwrap()
             .get("db.cardinality/many")
