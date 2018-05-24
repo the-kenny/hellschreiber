@@ -113,23 +113,21 @@ pub(crate) mod attr {
 }
 
 fn seed_datoms() -> Datoms<'static> {
-    let datoms = [(attr::id,               "db/id"),
-                  (attr::ident,            "db/ident"),
-                  (attr::doc,              "db/doc"),
-                  (attr::tx_instant,       "db/tx_instant"),
-                  (attr::cardinality_many, "db.cardinality/many"),
-    ].iter().
-        map(|(attr, ident)| {
-            Datom {
-                entity: attr.0,
-                attribute: attr::ident,
-                value: Value::Str(ident.to_string()),
-                tx: EntityId(0),
-                status: Status::Asserted,
-            }
-        }).collect::<Vec<Datom>>();
-
-    datoms
+    [(attr::id,               "db/id"),
+     (attr::ident,            "db/ident"),
+     (attr::doc,              "db/doc"),
+     (attr::tx_instant,       "db/tx_instant"),
+     (attr::cardinality_many, "db.cardinality/many"),
+    ].iter()
+     .map(|(attr, ident)| {
+         Datom {
+             entity: attr.0,
+             attribute: attr::ident,
+             value: Value::Str(ident.to_string()),
+             tx: EntityId(0),
+             status: Status::Asserted,
+         }
+     }).collect::<Vec<Datom>>()
 }
 
 #[derive(Debug, Clone)]
@@ -157,6 +155,7 @@ pub fn tempid() -> TempId {
     TempId(i as i64)
 }
 
+#[repr(u64)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Partition {
     Db   = 2 << 10,
@@ -217,9 +216,9 @@ pub trait Db: Sized {
             let mut highest_eid = self.highest_eid(Partition::User).0;
             let mut highest_db_eid = self.highest_eid(Partition::Db).0;
 
-            for operation in tx.iter() {
-                if let &Operation::TempidAssertion(tempid, attribute, _) = operation {
-                    eids.entry(tempid)
+            for operation in &tx {
+                if let Operation::TempidAssertion(tempid, attribute, _) = operation {
+                    eids.entry(*tempid)
                         .or_insert_with(|| {
                             // If we're asserting an internal attribute (db/id,
                             // db/ident, db/doc, db.cardinality/many) we use the Db
@@ -238,13 +237,13 @@ pub trait Db: Sized {
         };
 
         for operation in tx {
-            let (e, a, v, status) = match operation.into() {
+            let (e, a, v, status) = match operation {
                 Operation::Assertion(eid, a, v)       => (eid,        a, v, Status::Asserted),
                 Operation::Retraction(eid, a, v)      => (eid,        a, v, Status::Retracted(tx_eid)),
                 Operation::TempidAssertion(tid, a, v) => (eids[&tid], a, v, Status::Asserted)
             };
 
-            if !self.attribute_name(a).is_some() {
+            if self.attribute_name(a).is_none() {
                 return Err(TransactionError::NonIdentAttributeTransacted.into())
             }
 
@@ -295,7 +294,7 @@ pub trait Db: Sized {
                 value: v.clone(),
 
                 tx: tx_eid,
-                status: status
+                status
             };
 
             datoms.push(datom);
@@ -309,15 +308,15 @@ pub trait Db: Sized {
         })
     }
 
-    fn datoms<'a, I: Into<FilteredIndex>>(&'a self, index: I) -> Result<Datoms<'a>, Error>;
+    fn datoms<I: Into<FilteredIndex>>(&self, index: I) -> Result<Datoms, Error>;
 
-    fn entity<'a>(&'a self, entity: EntityId) -> Result<Entity<'a, Self>, Error> {
+    fn entity(&self, entity: EntityId) -> Result<Entity<Self>, Error> {
         let datoms = self.datoms(Index::Eavt.e(entity))?;
         let mut attrs: BTreeMap<Attribute, BTreeSet<&Datom>> = BTreeMap::new();
 
-        for d in datoms.iter() {
+        for d in &datoms {
             let entry = attrs.entry(d.attribute)
-                .or_insert_with(|| BTreeSet::new());
+                .or_insert_with(BTreeSet::new);
 
             match d.status {
                 Status::Asserted => {
@@ -347,7 +346,7 @@ pub trait Db: Sized {
         let entity = Entity {
             db: self,
             eid: entity,
-            values: values,
+            values,
         };
 
         Ok(entity)
@@ -370,7 +369,7 @@ pub trait Db: Sized {
             .map(|d| Attribute::new(d.entity))
     }
 
-    fn attribute_name<'a>(&'a self, attribute: Attribute) -> Option<String> {
+    fn attribute_name(&self, attribute: Attribute) -> Option<String> {
         self.datoms(Index::Avet.e(attribute.0).a(attr::ident)).unwrap()
             .into_iter()
             .next()

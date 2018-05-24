@@ -19,7 +19,7 @@ impl<'a, D: Db> Entity<'a, D> {
         attribute.to_attribute(self.db)
             .and_then(|attribute| self.values.get(&attribute))
             .map(|x| x.iter())
-            .unwrap_or(EMPTY_VEC.iter())
+            .unwrap_or_else(|| EMPTY_VEC.iter())
     }
 }
 

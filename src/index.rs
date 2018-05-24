@@ -26,7 +26,7 @@ pub struct FilteredIndex {
 
 impl FilteredIndex {
     pub fn new(index: Index) -> Self {
-        Self { index: index, e: None, a: None, v: None, t: None }
+        Self { index, e: None, a: None, v: None, t: None }
     }
     
     pub fn e(mut self, e: EntityId)  -> Self { self.e = Some(e); self }
@@ -39,17 +39,17 @@ impl FilteredIndex {
     }
 
     pub fn matches(&self, datom: &Datom) -> bool {
-        let e     = self.e;
-        let a     = self.a;
-        let ref v = self.v;
-        let t     = self.t;
+        let e = self.e;
+        let a = self.a;
+        let v = &self.v;
+        let t = self.t;
 
         let e = e.is_none() || e.unwrap() == datom.entity;
         let a = a.is_none() || a.unwrap() == datom.attribute;
         let v = v.is_none() || v.as_ref().unwrap() == &datom.value;
         let t = t.is_none() || t.unwrap() == datom.tx;
 
-        return e && a && v && t;;
+        e && a && v && t
     }
 }
 

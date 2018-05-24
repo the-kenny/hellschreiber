@@ -11,8 +11,8 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn as_str<'a>(&'a self) -> Option<&'a str> {
-        if let &Value::Str(ref s) = self {
+    pub fn as_str(&self) -> Option<&str> {
+        if let Value::Str(ref s) = self {
             Some(&s[..])
         } else {
             None
@@ -20,7 +20,7 @@ impl Value {
     }
 
     pub fn as_string(&self) -> Option<String> {
-        if let &Value::Str(ref s) = self {
+        if let Value::Str(ref s) = self {
             Some(s.clone())
         } else {
             None
@@ -28,24 +28,24 @@ impl Value {
     }
 
     pub fn as_int(&self) -> Option<i64> {
-        if let &Value::Int(i) = self {
-            Some(i)
+        if let Value::Int(i) = self {
+            Some(*i)
         } else {
             None
         }
     }
 
     pub fn as_datetime(&self) -> Option<chrono::DateTime<chrono::Utc>> {
-        if let &Value::DateTime(i) = self {
-            Some(i)
+        if let Value::DateTime(i) = self {
+            Some(*i)
         } else {
             None
         }
     }
 
     pub fn follow_ref<'a, D: Db>(&self, db: &'a D) -> Option<Entity<'a, D>> {
-        if let &Value::Ref(eid) = self {
-            Some(db.entity(eid).unwrap()) // TODO
+        if let Value::Ref(eid) = self {
+            Some(db.entity(*eid).unwrap()) // TODO
         } else {
             None
         }

@@ -16,7 +16,7 @@ impl SqliteDb {
     pub fn new() -> Result<Self, Error> {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
 
-        let mut db = SqliteDb { conn: conn };
+        let mut db = SqliteDb { conn };
         db.initialize()?;
         Ok(db)
     }
@@ -24,7 +24,7 @@ impl SqliteDb {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let conn = rusqlite::Connection::open(path).unwrap();
 
-        let mut db = SqliteDb { conn: conn };
+        let mut db = SqliteDb { conn };
         db.initialize()?;
         Ok(db)
     }
@@ -130,7 +130,7 @@ impl Db for SqliteDb {
         EntityId(std::cmp::max(n, partition as i64))
     }
 
-    fn datoms<'a, I: Into<FilteredIndex>>(&'a self, index: I) -> Result<Datoms, Error> {
+    fn datoms<I: Into<FilteredIndex>>(&self, index: I) -> Result<Datoms, Error> {
         let index = index.into();
         let (e, a, v, t) = index.eavt();
 
@@ -158,23 +158,23 @@ impl Db for SqliteDb {
       ", join_clause, order_statement))?;
 
         let entity_query_input = match e {
-            Some(EntityId(i)) => rusqlite::types::Value::Integer(i),
+            Some(EntityId(id)) => rusqlite::types::Value::Integer(id),
             None              => rusqlite::types::Value::Null,
         };
 
         let attribute_query_input = match a {
-            Some(Attribute(EntityId(i))) => rusqlite::types::Value::Integer(i),
+            Some(Attribute(EntityId(id))) => rusqlite::types::Value::Integer(id),
             None              => rusqlite::types::Value::Null,
         };
 
         use rusqlite::types::{ToSql,ToSqlOutput};
         let value_query_input = match v {
-            Some(ref v) => v.to_sql().expect("Failed to convert to SQL type"),
+            Some(ref value) => value.to_sql().expect("Failed to convert to SQL type"),
             None        => ToSqlOutput::Owned(rusqlite::types::Value::Null),
         };
 
         let tx_query_input = match t {
-            Some(EntityId(i)) => rusqlite::types::Value::Integer(i),
+            Some(EntityId(id)) => rusqlite::types::Value::Integer(id),
             None              => rusqlite::types::Value::Null,
         };
 
@@ -191,7 +191,7 @@ impl Db for SqliteDb {
             }
         })?
         .map(|r| r.map_err(|e| e.into()))
-            .collect::<Result<Vec<_>, _>>();
+        .collect::<Result<Vec<_>, _>>();
 
         datoms
     }
