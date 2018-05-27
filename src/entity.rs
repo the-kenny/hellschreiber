@@ -64,7 +64,6 @@ impl<'a, D: Db> ops::Index<&'a str> for Entity<'a, D> {
 #[cfg(test)]
 mod tests {
     use ::*;
-    use ::SqliteDb;
 
     const ONE: EntityId = EntityId(101010);
     const TWO: EntityId = EntityId(101011);

@@ -13,7 +13,7 @@ mod index;
 pub use index::*;
 
 mod transaction;
-pub use transaction::{Operation, ToOperation, TransactionError, TransactionData};
+pub use transaction::{Assert, Retract, Operation, ToOperation, TransactionError, TransactionData};
 
 mod entity;
 pub use entity::Entity;
@@ -358,6 +358,33 @@ pub trait Db: Sized {
     }
 }
 
+
+#[allow(unused)]
+macro_rules! test_impls {
+    ( $placeholder:ident, $fns:tt ) => {
+        test_impls!([(test_db, ::tests::in_memory::TestDb::new()),
+                     (sqlite,  ::SqliteDb::new().unwrap())],
+                    $placeholder,
+                    $fns);
+    };
+
+    ([ $( ($mod:ident, $db:expr) ),* ], $placeholder:ident, $fns:tt) => {
+        $(
+            mod $mod {
+                test_impls!($db, $placeholder, $fns);
+            }
+        )*
+    };
+
+    ( $db:expr, $placeholder:ident, { $( $fns:item )* }) => {
+        $(
+            #[allow(unused)]
+            macro_rules! $placeholder { () => { $db } }
+            $fns
+        )*
+    };
+}
+
 #[cfg(test)]
 pub mod tests {
     mod db;
@@ -365,41 +392,29 @@ pub mod tests {
     mod in_memory;
     mod usage;
 
-    macro_rules! test_db_impl {
-        ($name:ident, $t:expr) => {
-            mod $name {
-                #[test]
-                #[allow(unused_parens)]
-                fn test_db_other_equality() {
-                    let db1 = ::tests::in_memory::TestDb::new();
-                    let db2 = ($t);
-                    super::db::test_db_equality(db1, db2);
-                }
+    // TODO: Move to separate module
+    #[test]
+    fn test_db_equality() {
+        use ::*;
+        
+        let mut db1 = in_memory::TestDb::new();
+        let mut db2 = ::SqliteDb::new().unwrap();
+        
+        db1.store_datoms(&data::make_test_data()).unwrap();
+        db2.store_datoms(&data::make_test_data()).unwrap();
 
-                #[test] fn test_entity() {super::db::test_entity($t);}
-                #[test] fn test_seed_datoms() {super::db::test_seed_datoms($t);}
-                #[test] fn test_eavt_datoms() {super::db::test_eavt_datoms($t);}
-                #[test] fn test_aevt_datoms() {super::db::test_aevt_datoms($t);}
-                #[test] fn test_self_equality() {super::db::test_db_equality($t, $t);}
-                #[test] fn test_fn_attribute() {super::db::test_fn_attribute($t)}
-                #[test] fn test_metadata() { super::db::test_db_metadata($t) }
-                #[test] fn test_string_attributes() { super::db::test_string_attributes($t) }
-                #[test] fn test_highest_eid() { super::db::test_highest_eid($t) }
-                #[test] fn test_avet_index() { super::db::test_avet_index($t); }
-                #[test] fn test_repeated_assertions() { super::db::test_repeated_assertions($t); }
-                #[test] fn test_non_cardinality_many() { super::db::test_non_cardinality_many($t); }
-                #[test] fn test_cardinality_many() { super::db::test_cardinality_many($t); }
+        assert_eq!(db1.all_datoms(), db2.all_datoms(),
+                   "Equality of db1 and db2 for db.all_datoms()");
 
-                #[test] fn test_entity_index_trait() { super::db::test_entity_index_trait($t) }
-                #[test] fn test_error_changing_ident_attribute() { super::db::test_error_changing_ident_attribute($t) }
-                #[test] fn test_error_non_ident_attribute_transacted() { super::db::test_error_non_ident_attribute_transacted($t) }
-                #[test] fn test_transact_same_value() { super::db::test_transact_same_value($t); }
+        use ::tests::data::person_name;
+        for idx in [Index::Eavt.into(),
+                    Index::Eavt.e(EntityId(1)),
+                    Index::Eavt.e(EntityId(999)),
+                    Index::Eavt.a(person_name)].iter() {
 
-                #[test] fn test_usage_001() { super::usage::test_usage_001($t) }
-            }
+            assert_eq!(db1.datoms(idx.clone()).unwrap(),
+                       db2.datoms(idx.clone()).unwrap(),
+                       "Equality of db1 and db2 for the {:?} index", idx);
         }
     }
-
-    test_db_impl!(sqlite_db,    ::sqlite::SqliteDb::new().unwrap());
-    test_db_impl!(in_memory_db, ::tests::in_memory::TestDb::new());
 }
