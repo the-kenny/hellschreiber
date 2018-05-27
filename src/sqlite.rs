@@ -56,7 +56,7 @@ impl SqliteDb {
     fn make_datom(row: &rusqlite::Row) -> Datom {
         Datom {
             entity: EntityId(row.get(0)),
-            attribute: Attribute::new(EntityId(row.get(1))),
+            attribute: Attribute(EntityId(row.get(1))),
             value: row.get(2),
             tx: row.get(3),
             status: row.get(4),
@@ -184,7 +184,7 @@ impl Db for SqliteDb {
                                        &tx_query_input], |row| {
             Datom {
                 entity:    EntityId(row.get(0)),
-                attribute: Attribute::new(EntityId(row.get(1))),
+                attribute: Attribute(EntityId(row.get(1))),
                 value:     row.get(2),
                 tx:        row.get(3),
                 status:    Status::Asserted,

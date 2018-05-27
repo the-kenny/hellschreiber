@@ -30,7 +30,7 @@ use std::sync::atomic;
 use std::iter::FromIterator;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct EntityId(pub i64);
+pub struct EntityId(i64);
 
 pub type TxId = EntityId;
 
@@ -45,12 +45,6 @@ impl Attribute {
             || x == attr::ident
             || x == attr::doc
             || x == attr::cardinality_many
-    }
-}
-
-impl Attribute {
-    fn new(id: EntityId) -> Self {
-        Attribute(id)
     }
 }
 
@@ -366,7 +360,7 @@ pub trait Db: Sized {
         self.datoms(Index::Avet.a(attr::ident).v(Value::Str(attribute_name.into())))
             .unwrap()
             .iter().next()
-            .map(|d| Attribute::new(d.entity))
+            .map(|d| Attribute(d.entity))
     }
 
     fn attribute_name(&self, attribute: Attribute) -> Option<String> {
