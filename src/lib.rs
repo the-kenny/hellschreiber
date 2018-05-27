@@ -13,7 +13,7 @@ mod index;
 pub use index::*;
 
 mod transaction;
-pub use transaction::*;
+pub use transaction::{Operation, ToOperation, TransactionError, TransactionData};
 
 mod entity;
 pub use entity::Entity;
@@ -122,22 +122,6 @@ fn seed_datoms() -> Datoms<'static> {
              status: Status::Asserted,
          }
      }).collect::<Vec<Datom>>()
-}
-
-#[derive(Debug, Clone)]
-pub struct TransactionData {
-    pub tx_id: TxId,
-    pub tempid_mappings: BTreeMap<TempId, EntityId>
-}
-
-// TODO: Use `String` to describe the attributes
-#[derive(Debug, Fail, PartialEq, Eq)]
-pub enum TransactionError {
-    #[fail(display = "Tried to transact fact for attribute without db/ident")]
-    NonIdentAttributeTransacted,
-    #[fail(display = "Tried to transact new value ({}) for existing db/ident attribute {}", _0, _1)]
-    ChangingIdentAttribute(String, String),
-    // TODO: Error for setting db.cardinality/many on db/ident
 }
 
 lazy_static! {

@@ -2,6 +2,24 @@ use super::*;
 
 use std::fmt;
 
+/// Struct containing the `tx_id` of a successful transaction and
+/// allows mapping from `TempId`s to `EntityId`s.
+#[derive(Debug)]
+pub struct TransactionData {
+    pub tx_id: TxId,
+    pub tempid_mappings: BTreeMap<TempId, EntityId>
+}
+
+// TODO: Use `String` to describe the attributes
+#[derive(Debug, Fail, PartialEq, Eq)]
+pub enum TransactionError {
+    #[fail(display = "Tried to transact fact for attribute without db/ident")]
+    NonIdentAttributeTransacted,
+    #[fail(display = "Tried to transact new value ({}) for existing db/ident attribute {}", _0, _1)]
+    ChangingIdentAttribute(String, String),
+    // TODO: Error for setting db.cardinality/many on db/ident
+}
+
 #[derive(Debug)]
 pub enum Operation {
     Assertion(EntityId, Attribute, Value),
