@@ -1,10 +1,10 @@
 begin;
 
 create table datoms (
-  e            integer not null,
-  a            integer not null,
+  e            integer not null check(e >= 0),
+  a            integer not null check(a >= 0),
   v            blob    not null,
-  t            integer not null,
+  t            integer not null check(t >= 0),
   retracted_tx integer default null
 );
 

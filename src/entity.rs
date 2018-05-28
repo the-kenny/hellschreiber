@@ -10,6 +10,10 @@ pub struct Entity<'a, D: Db + 'a> {
     pub values: BTreeMap<Attribute, Vec<Value>>,
 }
 
+#[derive(Debug, Fail, PartialEq, Eq)]
+#[fail(display = "Couldn't follow attribute. Not a Ref.")]
+pub struct NoRefError;
+
 impl<'a, D: Db> Entity<'a, D> {
     pub fn get<A: ToAttribute>(&'a self, attribute: A) -> Option<&'a Value> {
         self.get_many(attribute).next()
@@ -20,6 +24,13 @@ impl<'a, D: Db> Entity<'a, D> {
             .and_then(|attribute| self.values.get(&attribute))
             .map(|x| x.iter())
             .unwrap_or_else(|| EMPTY_VEC.iter())
+    }
+
+    pub fn follow_ref<A: ToAttribute>(&'a self, ref_attribute: A) -> Result<Entity<'a, D>, NoRefError> {
+        match self[ref_attribute] {
+            Value::Ref(eid) => Ok(self.db.entity(eid).unwrap()),
+            _ => Err(NoRefError)
+        }
     }
 }
 
@@ -40,6 +51,7 @@ lazy_static! {
     static ref EMPTY_VEC: Vec<Value> = vec![];
 }
 
+/*
 impl<'a, D: Db> ops::Index<&'a str> for &'a Entity<'a, D> {
     type Output = Vec<Value>;
     fn index(&self, idx: &str) -> &Self::Output {
@@ -52,7 +64,17 @@ impl<'a, D: Db> ops::Index<&'a str> for &'a Entity<'a, D> {
         }
     }
 }
+*/
 
+impl<'a, D: Db, A: ToAttribute> ops::Index<A> for Entity<'a, D> {
+    type Output = Value;
+    fn index(&self, attribute: A) -> &Self::Output {
+        self.get(attribute).unwrap()
+    }
+}
+
+
+/*
 // TODO: Get rid of duplication
 impl<'a, D: Db> ops::Index<&'a str> for Entity<'a, D> {
     type Output = Value;
@@ -60,11 +82,13 @@ impl<'a, D: Db> ops::Index<&'a str> for Entity<'a, D> {
         self.get(idx).unwrap()
     }
 }
+*/
 
 #[cfg(test)]
 mod tests {
     use ::*;
-
+    use super::*;
+ 
     const ONE: EntityId = EntityId(101010);
     const TWO: EntityId = EntityId(101011);
 
@@ -72,12 +96,22 @@ mod tests {
         let mut db = SqliteDb::new().unwrap();
         let foo_bar = db.tempid();
         let schema_tx = &[(Assert, foo_bar, "db/ident", Value::Str("foo/bar".into())),
-                          (Assert, foo_bar, "db.cardinality/many", true.into())];
+                          (Assert, foo_bar, "db.cardinality/many", true.into()),
+                          (Assert, tempid(), "db/ident", "some/ref".into())];
         db.transact(schema_tx).unwrap();
 
         db.transact(&[(Assert, ONE, "foo/bar", Value::Str("foo".to_string()))]).unwrap();
         db.transact(&[(Assert, TWO, "foo/bar", Value::Str("bar".to_string()))]).unwrap();
         db.transact(&[(Assert, TWO, "foo/bar", Value::Str("baz".to_string()))]).unwrap();
+        db.transact(&[(Assert, TWO, "some/ref", ONE)]).unwrap();
+
+        // TODO: Implement `Assert` for Value::Ref with TempId
+        /*
+        let referred = tempid();
+        let referring = tempid();
+        db.transact(&[(Assert, referred, "foo/bar", Value::Int(42)),
+                      (Assert, referring, "some/ref", Value::Ref(referred))]).unwrap();
+         */
         db
     }
 
@@ -125,5 +159,15 @@ mod tests {
     fn index_panic() {
         let db = test_db();
         let _ = db.entity(ONE).unwrap()["asdasdf"];
+    }
+
+    #[test]
+    fn follow_ref() {
+        let db = test_db();
+        let two = db.entity(TWO).unwrap();
+        let one = two.follow_ref("some/ref").unwrap();
+
+        assert_eq!(one.eid, ONE);
+        assert_eq!(one.follow_ref("foo/bar").unwrap_err(), NoRefError);
     }
 }
