@@ -78,8 +78,8 @@ test_impls!(db, {
         let karl  = db.entity(EntityId(2)).unwrap().values;
         assert_eq!(karl.len(), 2);    // name + children
         assert_eq!(karl[&person_name], vec![Value::Str("Karl".into())]);
-        assert_eq!(karl[&person_children], vec![Value::Str("Philipp".into()),
-                                                Value::Str("Jens".into())]);
+        assert_eq!(karl[&person_children], vec![Value::Str("Jens".into()),
+                                                Value::Str("Philipp".into())]);
 
         let nevermind = db.entity(EntityId(3)).unwrap().values;
         assert_eq!(nevermind.len(), 1);
@@ -267,11 +267,9 @@ test_impls!(db, {
                                 (Assert, tid, "foo/bar", Value::Int(23)),
                                 (Assert, tid, "foo/bar", Value::Int(42))]).unwrap();
 
-        use std::collections::BTreeSet;
-
         let entity = db.entity(txd.tempid_mappings[&tid]).unwrap();
-        assert_eq!(entity.get_many("foo/bar").collect::<BTreeSet<_>>(),
-                   BTreeSet::from_iter(vec![&Value::Int(42), &Value::Int(23)]));
+        assert_eq!(entity.get_many("foo/bar"),
+                   &[Value::Int(23), Value::Int(42)]);
     }
 
     // Default case: cardinality_many is false
@@ -285,7 +283,7 @@ test_impls!(db, {
         db.transact(&[(Assert, eid, "foo/bar", Value::Int(42))]).unwrap();
 
         let entity = db.entity(eid).unwrap();
-        assert_eq!(entity.get_many("foo/bar").count(), 1);
+        assert_eq!(entity.get_many("foo/bar").len(), 1);
     }
 
     // Cardinality_many true
@@ -301,9 +299,9 @@ test_impls!(db, {
         db.transact(&[(Assert, eid, "foo/bar", Value::Int(42))]).unwrap();
 
         let entity = db.entity(eid).unwrap();
-        assert_eq!(entity.get_many("foo/bar").count(), 2);
-        assert_eq!(entity.get_many("foo/bar").collect::<BTreeSet<_>>(),
-                   BTreeSet::from_iter(vec![&Value::Int(42), &Value::Int(23)]));
+        assert_eq!(entity.get_many("foo/bar").len(), 2);
+        assert_eq!(entity.get_many("foo/bar"),
+                   &[Value::Int(23), Value::Int(42)]);
     }
 
     #[test]

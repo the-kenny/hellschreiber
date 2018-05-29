@@ -16,14 +16,14 @@ pub struct NoRefError;
 
 impl<'a, D: Db> Entity<'a, D> {
     pub fn get<A: ToAttribute>(&'a self, attribute: A) -> Option<&'a Value> {
-        self.get_many(attribute).next()
+        self.get_many(attribute).iter().next()
     }
 
-    pub fn get_many<A: ToAttribute>(&'a self, attribute: A) -> impl Iterator<Item=&'a Value> {
+    pub fn get_many<A: ToAttribute>(&'a self, attribute: A) -> &'a[Value] {
         attribute.to_attribute(self.db)
             .and_then(|attribute| self.values.get(&attribute))
-            .map(|x| x.iter())
-            .unwrap_or_else(|| EMPTY_VEC.iter())
+            .map(|x| &x[..])
+            .unwrap_or_else(|| &EMPTY_VEC[..])
     }
 
     pub fn follow_ref<A: ToAttribute>(&'a self, ref_attribute: A) -> Result<Entity<'a, D>, NoRefError> {
@@ -134,13 +134,13 @@ mod tests {
         let db = test_db();
 
         let one = db.entity(ONE).unwrap();
-        assert_eq!(one.get_many("foo/bar").collect::<Vec<_>>(),
-                   vec![&Value::Str("foo".to_string())]);
+        assert_eq!(one.get_many("foo/bar"),
+                   &[Value::Str("foo".to_string())]);
 
         let two = db.entity(TWO).unwrap();
-        assert_eq!(two.get_many("foo/bar").collect::<Vec<_>>(),
-                   vec![&Value::Str("bar".to_string()),
-                        &Value::Str("baz".to_string())]);
+        assert_eq!(two.get_many("foo/bar"),
+                   &[Value::Str("bar".to_string()),
+                     Value::Str("baz".to_string())]);
     }
 
     #[test]

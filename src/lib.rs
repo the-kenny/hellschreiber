@@ -287,31 +287,32 @@ pub trait Db: Sized {
         let datoms = self.datoms(Index::Eavt.e(entity))?;
         let mut attrs: BTreeMap<Attribute, BTreeSet<&Datom>> = BTreeMap::new();
 
-        for d in &datoms {
-            let entry = attrs.entry(d.attribute)
+        for datoms in &datoms {
+            let entry = attrs.entry(datoms.attribute)
                 .or_insert_with(BTreeSet::new);
 
-            match d.status {
+            match datoms.status {
                 Status::Asserted => {
-                    entry.insert(&d);
+                    entry.insert(&datoms);
                 },
-                Status::Retracted(_) if entry.contains(&d) => {
-                    entry.remove(&d);
+                Status::Retracted(_) if entry.contains(&datoms) => {
+                    entry.remove(&datoms);
                 },
                 Status::Retracted(_) => {
-                    panic!("Got retraction for non-existing value. Retraction: {:?}", d)
+                    panic!("Got retraction for non-existing value. Retraction: {:?}", datoms)
                 }
             }
         }
 
         // Assert all datoms are of the same entity
-        assert!(attrs.values().flat_map(|x| x).all(|d| d.entity == entity));
+        assert!(attrs.values().flat_map(|x| x).all(|datoms| datoms.entity == entity));
 
         let values = attrs.into_iter()
             .map(|(a, ds)| {
-                let mut d: Vec<_> = ds.into_iter().collect();
-                d.sort_by_key(|d| d.tx);
-                (a, d.into_iter().map(|d| d.value.clone()).collect())
+                let datoms: Vec<_> = ds.into_iter()
+                    .map(|datoms| datoms.value.clone())
+                    .collect();
+                (a, datoms)
             }).collect::<BTreeMap<Attribute, Vec<Value>>>();
 
         let entity = Entity {
