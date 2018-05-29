@@ -308,14 +308,12 @@ pub trait Db: Sized {
         // Assert all datoms are of the same entity
         assert!(attrs.values().flat_map(|x| x).all(|d| d.entity == entity));
 
-        let mut values = attrs.into_iter()
+        let values = attrs.into_iter()
             .map(|(a, ds)| {
                 let mut d: Vec<_> = ds.into_iter().collect();
                 d.sort_by_key(|d| d.tx);
                 (a, d.into_iter().map(|d| d.value.clone()).collect())
             }).collect::<BTreeMap<Attribute, Vec<Value>>>();
-
-        values.insert(attr::id, vec![Value::Int(entity.0)]);
 
         let entity = Entity {
             db: self,

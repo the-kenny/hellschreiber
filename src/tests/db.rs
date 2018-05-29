@@ -1,6 +1,6 @@
 test_impls!(db, {
     use ::*;
-    
+
     fn validate_datoms(datoms: &[Datom]) {
         use std::collections::{BTreeMap,BTreeSet};
         // TODO: This logic is duplicated in `Db::entity`
@@ -65,25 +65,36 @@ test_impls!(db, {
         db.store_datoms(&tests::data::make_test_data()).unwrap();
         validate_datoms(&db.all_datoms());
 
-        assert_eq!(db.entity(EntityId(99999)).unwrap().values.len(), 1);
-        assert_eq!(db.entity(EntityId(99999)).unwrap().values[&attr::id], vec![Value::Int(99999)]);
+        assert_eq!(db.entity(EntityId(99999)).unwrap().values.len(), 0);
+        assert_eq!(db.entity(EntityId(99999)).unwrap().values.get(&attr::id), None);
 
         let heinz = db.entity(EntityId(1)).unwrap().values;
-        assert_eq!(heinz.len(), 3);   // name + age + db/id
-        assert_eq!(heinz.get(&attr::id), Some(&vec![Value::Int(1)]));
+        assert_eq!(heinz.len(), 2);   // name + age
+        assert_eq!(heinz.get(&attr::id), None);
         assert_eq!(heinz.get(&person_name), Some(&vec![Value::Str("Heinz".into())]));
         assert_eq!(heinz.get(&person_age), Some(&vec![Value::Int(42)]));
         assert_eq!(heinz.get(&album_name), None);
 
         let karl  = db.entity(EntityId(2)).unwrap().values;
-        assert_eq!(karl.len(), 3);    // name + children + db/id
+        assert_eq!(karl.len(), 2);    // name + children
         assert_eq!(karl[&person_name], vec![Value::Str("Karl".into())]);
         assert_eq!(karl[&person_children], vec![Value::Str("Philipp".into()),
                                                 Value::Str("Jens".into())]);
 
         let nevermind = db.entity(EntityId(3)).unwrap().values;
-        assert_eq!(nevermind.len(), 2);
+        assert_eq!(nevermind.len(), 1);
         assert_eq!(nevermind.get(&tests::data::album_name), Some(&vec![Value::Str("Nevermind".into())]));
+    }
+
+    #[test]
+    fn test_missing_entity_no_panic() {
+        let db = db!();
+        let eid = EntityId(123456);
+
+        let entity = db.entity(eid).unwrap();
+
+        assert_eq!(eid, entity.eid);
+        assert!(entity.values.is_empty());
     }
 
     #[test]
@@ -167,7 +178,7 @@ test_impls!(db, {
         assert_eq!(2, db.datoms(Index::Aevt.a(person_name_attr)).unwrap().len());
         assert_eq!(1, db.datoms(Index::Aevt.a(person_age_attr)).unwrap().len());
     }
-    
+
     #[test]
     fn test_fn_attribute() {
         let mut db = db!();
