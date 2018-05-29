@@ -148,6 +148,11 @@ impl Partition {
     }
 }
 
+#[derive(Debug)]
+pub struct AttributeInfo {
+    pub cardinality_many: bool,
+}
+
 // TODO: Add `is_initialized?` and `initialize`
 pub trait Db: Sized {
     #[cfg(test)]
@@ -241,18 +246,9 @@ pub trait Db: Sized {
                     }
 
                     // Handle db.cardinality/many
-                    let cardinality_many = self.entity(a.0)
-                        .unwrap()
-                        .get("db.cardinality/many")
-                        .map(|v| match v {
-                            // Treat every value except Bool(false) as truthy. Allows
-                            // the user to assert any value for documentation or
-                            // whatever.
-                            Value::Bool(false) => false,
-                            _                  => true
-                        }).unwrap_or(false);
+                    let attribute_info = self.attribute_info(a)?;
 
-                    if !cardinality_many {
+                    if !attribute_info.cardinality_many {
                         let retraction = Datom {
                             entity: e,
                             attribute: a,
@@ -356,6 +352,25 @@ pub trait Db: Sized {
                 _ => None
             })
     }
+
+    fn attribute_info<A: ToAttribute>(&self, attribute: A) -> Result<AttributeInfo, Error> {
+        let mut info = AttributeInfo {
+            cardinality_many: false
+        };
+
+        let attribute_eid = attribute.to_attribute(self).unwrap().0;
+        let attribute_datoms = self.datoms(Index::Eavt.e(attribute_eid))?;
+        for datom in attribute_datoms {
+            match datom.attribute {
+                attr::cardinality_many => {
+                    info.cardinality_many = datom.value != Value::Bool(false)
+                },
+                _ => ()
+            }
+        }
+
+        Ok(info)
+    }
 }
 
 
@@ -396,10 +411,10 @@ pub mod tests {
     #[test]
     fn test_db_equality() {
         use ::*;
-        
+
         let mut db1 = in_memory::TestDb::new();
         let mut db2 = ::SqliteDb::new().unwrap();
-        
+
         db1.store_datoms(&data::make_test_data()).unwrap();
         db2.store_datoms(&data::make_test_data()).unwrap();
 
