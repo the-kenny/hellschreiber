@@ -3,8 +3,15 @@ extern crate serde_json;
 
 use super::*;
 
-use failure::Error;
 use std::path::Path;
+
+#[derive(Debug, Fail, From)]
+pub enum Error {
+    #[fail(display="Sqlite Error: {}", _0)]
+    Sqlite(rusqlite::Error),
+    #[fail(display="Transaction Error: {}", _0)]
+    TransactionError(transaction::TransactionError)
+}
 
 #[derive(Debug)]
 pub struct SqliteDb {
@@ -64,8 +71,9 @@ impl SqliteDb {
     }
 }
 
-
 impl Db for SqliteDb {
+    type Error = Error;
+
     #[cfg(test)]
     fn all_datoms<'a>(&'a self) -> Datoms<'a> {
         let mut added_query = self.conn.prepare(
@@ -130,7 +138,7 @@ impl Db for SqliteDb {
         EntityId(std::cmp::max(n, partition as i64))
     }
 
-    fn datoms<I: Into<FilteredIndex>>(&self, index: I) -> Result<Datoms, Error> {
+    fn datoms<I: Into<FilteredIndex>>(&self, index: I) -> Result<Datoms, Self::Error> {
         let index = index.into();
         let (e, a, v, t) = index.eavt();
 
@@ -196,7 +204,7 @@ impl Db for SqliteDb {
         datoms
     }
 
-    fn store_datoms(&mut self, datoms: &[Datom]) -> Result<(), Error> {
+    fn store_datoms(&mut self, datoms: &[Datom]) -> Result<(), Self::Error> {
         let tx = self.conn.transaction()?;
 
         {

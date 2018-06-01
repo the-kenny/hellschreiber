@@ -1,5 +1,7 @@
 use ::*;
 
+/*
+
 use std::fmt;
 
 #[allow(unused)]
@@ -15,7 +17,9 @@ impl TestDb {
 }
 
 impl Db for TestDb {
-    fn store_datoms(&mut self, datoms: &[Datom]) -> Result<(), Error> {
+    type Error = failure::Error;
+
+    fn store_datoms(&mut self, datoms: &[Datom]) -> Result<(), Self::Error> {
         self.0.extend_from_slice(datoms);
         Ok(())
     }
@@ -27,7 +31,7 @@ impl Db for TestDb {
         datoms
     }
 
-    fn datoms<I: Into<FilteredIndex>>(&self, index: I) -> Result<Datoms, Error> {
+    fn datoms<I: Into<FilteredIndex>>(&self, index: I) -> Result<Datoms, Self::Error> {
         #[derive(Debug)]
         struct EavEquality(Datom);
 
@@ -120,3 +124,4 @@ impl fmt::Debug for TestDb {
             .finish()
     }
 }
+*/

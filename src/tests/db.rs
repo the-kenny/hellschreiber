@@ -306,6 +306,8 @@ test_impls!(db, {
 
     #[test]
     fn test_error_changing_ident_attribute() {
+        use ::sqlite::Error;
+        
         let mut db = db!();
         let attr = EntityId(101010);
         db.transact(&[(Assert, attr, "db/ident", "foo/bar")]).unwrap();
@@ -315,18 +317,25 @@ test_impls!(db, {
 
         // Changing the ident is an error
         let error = db.transact(&[(Assert, attr, "db/ident", "some.new/ident")]).unwrap_err();
-        assert_eq!(TransactionError::ChangingIdentAttribute("foo/bar".into(), "some.new/ident".into()),
-                   error.downcast::<TransactionError>().unwrap());
+
+        match error {
+            Error::TransactionError(TransactionError::ChangingIdentAttribute(_, _)) => (),
+            _ => panic!("")
+        }
     }
 
     #[test]
     fn test_error_non_ident_attribute_transacted() {
+        use ::sqlite::Error;
+        
         let mut db = db!();
         let tx = &[(Assert, db.tempid(), "foo/bar", Value::Int(42))];
         let error = db.transact(tx).unwrap_err();
 
-        let transaction_error = error.downcast::<TransactionError>().unwrap();
-        assert_eq!(TransactionError::NonIdentAttributeTransacted, transaction_error);
+        match error {
+            Error::TransactionError(TransactionError::NonIdentAttributeTransacted) => (),
+            _ => panic!("")
+        }
     }
 
     #[test]
