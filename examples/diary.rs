@@ -12,8 +12,8 @@ struct DiaryEntry {
     text: String
 }
 
-impl<'a, D: Db> From<Entity<'a, D>> for DiaryEntry {
-    fn from(o: Entity<'a, D>) -> DiaryEntry {
+impl<'a> From<Entity<'a>> for DiaryEntry {
+    fn from(o: Entity<'a>) -> DiaryEntry {
         DiaryEntry {
             eid: o.eid,
             date: o.get("diary.entry/date").unwrap().as_datetime().unwrap(),
@@ -23,7 +23,7 @@ impl<'a, D: Db> From<Entity<'a, D>> for DiaryEntry {
 }
 
 fn main() {
-    let mut db = hellschreiber::SqliteDb::open("diary.sqlite").unwrap();
+    let mut db = hellschreiber::Db::open("diary.sqlite").unwrap();
 
     if !db.has_attribute("diary.entry/text") {
         store_schema(&mut db);
@@ -46,7 +46,7 @@ fn main() {
     }
 }
 
-fn store_schema(db: &mut hellschreiber::SqliteDb) {
+fn store_schema(db: &mut hellschreiber::Db) {
     let schema_tx = &[(Assert, db.tempid(), "db/ident", "diary.entry/text"),
                       (Assert, db.tempid(), "db/ident", "diary.entry/date")];
     db.transact(schema_tx)

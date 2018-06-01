@@ -4,8 +4,8 @@ use std::{fmt, ops};
 use std::collections::BTreeMap;
 
 #[allow(dead_code)]
-pub struct Entity<'a, D: Db + 'a> {
-    pub db: &'a D,
+pub struct Entity<'a> {
+    pub db: &'a Db,
     pub eid: EntityId,
     pub values: BTreeMap<Attribute, Vec<Value>>,
 }
@@ -14,7 +14,7 @@ pub struct Entity<'a, D: Db + 'a> {
 #[fail(display = "Couldn't follow attribute. Not a Ref.")]
 pub struct NoRefError;
 
-impl<'a, D: Db> Entity<'a, D> {
+impl<'a> Entity<'a> {
     pub fn get<A: ToAttribute>(&'a self, attribute: A) -> Option<&'a Value> {
         self.get_many(attribute).iter().next()
     }
@@ -26,7 +26,7 @@ impl<'a, D: Db> Entity<'a, D> {
             .unwrap_or_else(|| &EMPTY_VEC[..])
     }
 
-    pub fn follow_ref<A: ToAttribute>(&'a self, ref_attribute: A) -> Result<Entity<'a, D>, NoRefError> {
+    pub fn follow_ref<A: ToAttribute>(&'a self, ref_attribute: A) -> Result<Entity<'a>, NoRefError> {
         match self[ref_attribute] {
             Value::Ref(eid) => Ok(self.db.entity(eid).unwrap()),
             _ => Err(NoRefError)
@@ -34,7 +34,7 @@ impl<'a, D: Db> Entity<'a, D> {
     }
 }
 
-impl<'a, D: Db> fmt::Debug for Entity<'a, D> {
+impl<'a> fmt::Debug for Entity<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         let pretty_values: BTreeMap<_, &Vec<Value>> = self.values.iter()
             .map(|(attr, value)| (self.db.attribute_name(*attr).unwrap(), value))
@@ -66,7 +66,7 @@ impl<'a, D: Db> ops::Index<&'a str> for &'a Entity<'a, D> {
 }
 */
 
-impl<'a, D: Db, A: ToAttribute> ops::Index<A> for Entity<'a, D> {
+impl<'a, A: ToAttribute> ops::Index<A> for Entity<'a> {
     type Output = Value;
     fn index(&self, attribute: A) -> &Self::Output {
         self.get(attribute).unwrap()
@@ -92,8 +92,8 @@ mod tests {
     const ONE: EntityId = EntityId(101010);
     const TWO: EntityId = EntityId(101011);
 
-    fn test_db() -> impl Db {
-        let mut db = SqliteDb::new().unwrap();
+    fn test_db() -> Db {
+        let mut db = Db::new().unwrap();
         let foo_bar = db.tempid();
         let schema_tx = &[(Assert, foo_bar, "db/ident", Value::Str("foo/bar".into())),
                           (Assert, foo_bar, "db.cardinality/many", true.into()),

@@ -43,7 +43,7 @@ impl Value {
         }
     }
 
-    pub fn follow_ref<'a, D: Db>(&self, db: &'a D) -> Option<Entity<'a, D>> {
+    pub fn follow_ref<'a>(&self, db: &'a Db) -> Option<Entity<'a>> {
         if let Value::Ref(eid) = self {
             Some(db.entity(*eid).unwrap()) // TODO
         } else {

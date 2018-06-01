@@ -1,11 +1,11 @@
 extern crate hellschreiber;
 extern crate chrono;
 
-use hellschreiber::{Db, SqliteDb, Assert, Value};
+use hellschreiber::{Db, Assert, Value};
 
 fn main() {
     // Open an in-memory DB
-    let mut db = SqliteDb::new().expect("Failed to open DB");
+    let mut db = Db::new().expect("Failed to open DB");
 
     // Transact Schema
     let schema = &[(Assert, db.tempid(), "db/ident", "diary.entry/text"),

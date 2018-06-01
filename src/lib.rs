@@ -21,12 +21,10 @@ mod value;
 pub use value::Value;
 
 mod sqlite;
-pub use sqlite::SqliteDb;
+pub use sqlite::Db;
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic;
-use std::iter::FromIterator;
-use std::fmt::Debug;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct EntityId(i64);
@@ -48,17 +46,17 @@ impl Attribute {
 }
 
 pub trait ToAttribute {
-    fn to_attribute<D: Db>(&self, db: &D) -> Option<Attribute>;
+    fn to_attribute(&self, db: &Db) -> Option<Attribute>;
 }
 
 impl ToAttribute for Attribute {
-    fn to_attribute<D: Db>(&self, _db: &D) -> Option<Attribute> {
+    fn to_attribute(&self, _db: &Db) -> Option<Attribute> {
         Some(*self)
     }
 }
 
 impl<'a> ToAttribute for &'a str {
-    fn to_attribute<D: Db>(&self, db: &D) -> Option<Attribute> {
+    fn to_attribute(&self, db: &Db) -> Option<Attribute> {
         db.attribute(self)
     }
 }
@@ -141,6 +139,7 @@ pub enum Partition {
 }
 
 impl Partition {
+    #[allow(unused)]
     fn contains(&self, eid: EntityId) -> bool {
         let i = *self as i64;
         (i & eid.0) == i
@@ -152,234 +151,10 @@ pub struct AttributeInfo {
     pub cardinality_many: bool,
 }
 
-// TODO: Add `is_initialized?` and `initialize`
-pub trait Db: Sized {
-    type Error: Debug + failure::Fail + From<TransactionError>;
-
-    #[cfg(test)]
-    fn all_datoms<'a>(&'a self) -> Datoms<'a>;
-
-    fn highest_eid(&self, partition: Partition) -> EntityId {
-        // TODO: Use FilteredIndex's impl
-        let n = self.datoms(Index::Eavt).unwrap() // TODO
-            .into_iter()
-            .filter(|d| partition.contains(d.entity))
-            .last()
-            .map(|datom| datom.entity.0)
-            .unwrap_or(0);
-
-        EntityId(std::cmp::max(n, partition as i64))
-    }
-
-    fn tempid(&mut self) -> TempId {
-        tempid()
-    }
-
-    fn transact<O: ToOperation, I: IntoIterator<Item=O>>(&mut self, tx: I) -> Result<TransactionData, Self::Error> {
-        let tx_eid = EntityId(self.highest_eid(Partition::Tx).0 + 1);
-
-        let now = chrono::Utc::now();
-
-        let mut datoms = vec![Datom {
-            entity:    tx_eid,
-            attribute: attr::tx_instant,
-            value:     Value::DateTime(now),
-            tx:        tx_eid,
-            status:    Status::Asserted
-        }];
-
-        let tx = tx.into_iter()
-            .map(|op| op.to_operation(self))
-            .map(|op| op.map_err(|_| TransactionError::NonIdentAttributeTransacted))
-            .collect::<Result<Vec<Operation>, TransactionError>>()?;
-
-        datoms.reserve(tx.len());
-
-        let eids = {
-            let mut eids = BTreeMap::new();
-            let mut highest_eid = self.highest_eid(Partition::User).0;
-            let mut highest_db_eid = self.highest_eid(Partition::Db).0;
-
-            for operation in &tx {
-                if let Operation::TempidAssertion(tempid, attribute, _) = operation {
-                    eids.entry(*tempid)
-                        .or_insert_with(|| {
-                            // If we're asserting an internal attribute (db/id,
-                            // db/ident, db/doc, db.cardinality/many) we use the Db
-                            // partition
-                            if attribute.is_internal() {
-                                highest_db_eid += 1;
-                                EntityId(highest_db_eid)
-                            } else {
-                                highest_eid += 1;
-                                EntityId(highest_eid)
-                            }
-                        });
-                }
-            }
-            eids
-        };
-
-        for operation in tx {
-            let (e, a, v, status) = match operation {
-                Operation::Assertion(eid, a, v)       => (eid,        a, v, Status::Asserted),
-                Operation::Retraction(eid, a, v)      => (eid,        a, v, Status::Retracted(tx_eid)),
-                Operation::TempidAssertion(tid, a, v) => (eids[&tid], a, v, Status::Asserted)
-            };
-
-            if self.attribute_name(a).is_none() {
-                return Err(TransactionError::NonIdentAttributeTransacted.into())
-            }
-
-            // If the operation is an assertion we have to handle the following things:
-            //
-            // - If the datom isn't db.cardinality/many we have to generate a retraction for the previous value
-            //
-            // - If the attribute of this datom is `db/ident` we have to make sure it isn't changing the schema
-            //
-            if status == Status::Asserted {
-                if let Some(previous_datom) = self.datoms(Index::Eavt.e(e).a(a)).unwrap().iter().next() {
-                    // Prevent database schema changes
-                    if a == attr::ident && v != previous_datom.value {
-                        let old_attribute_name = previous_datom.value.as_string().unwrap();
-                        let new_attribute_name = v.as_string().unwrap();
-                        return Err(TransactionError::ChangingIdentAttribute(old_attribute_name, new_attribute_name).into())
-                    }
-
-                    // Handle db.cardinality/many
-                    let attribute_info = self.attribute_info(a)?;
-
-                    if !attribute_info.cardinality_many {
-                        let retraction = Datom {
-                            entity: e,
-                            attribute: a,
-                            value: previous_datom.value.clone(),
-                            tx: tx_eid,
-                            status: Status::Retracted(tx_eid)
-                        };
-
-                        datoms.push(retraction);
-                    }
-                }
-            }
-
-            let datom = Datom {
-                entity: e,
-                attribute: a,
-                value: v.clone(),
-
-                tx: tx_eid,
-                status
-            };
-
-            datoms.push(datom);
-        }
-
-        self.store_datoms(&datoms)?;
-
-        Ok(TransactionData {
-            tx_id: tx_eid,
-            tempid_mappings: eids,
-        })
-    }
-
-    fn datoms<I: Into<FilteredIndex>>(&self, index: I) -> Result<Datoms, Self::Error>;
-
-    fn entity(&self, entity: EntityId) -> Result<Entity<Self>, Self::Error> {
-        let datoms = self.datoms(Index::Eavt.e(entity))?;
-        let mut attrs: BTreeMap<Attribute, BTreeSet<&Datom>> = BTreeMap::new();
-
-        for datoms in &datoms {
-            let entry = attrs.entry(datoms.attribute)
-                .or_insert_with(BTreeSet::new);
-
-            match datoms.status {
-                Status::Asserted => {
-                    entry.insert(&datoms);
-                },
-                Status::Retracted(_) if entry.contains(&datoms) => {
-                    entry.remove(&datoms);
-                },
-                Status::Retracted(_) => {
-                    panic!("Got retraction for non-existing value. Retraction: {:?}", datoms)
-                }
-            }
-        }
-
-        // Assert all datoms are of the same entity
-        assert!(attrs.values().flat_map(|x| x).all(|datoms| datoms.entity == entity));
-
-        let values = attrs.into_iter()
-            .map(|(a, ds)| {
-                let datoms: Vec<_> = ds.into_iter()
-                    .map(|datoms| datoms.value.clone())
-                    .collect();
-                (a, datoms)
-            }).collect::<BTreeMap<Attribute, Vec<Value>>>();
-
-        let entity = Entity {
-            db: self,
-            eid: entity,
-            values,
-        };
-
-        Ok(entity)
-    }
-
-    fn store_datoms(&mut self, _datoms: &[Datom]) -> Result<(), Self::Error>;
-
-    fn has_attribute(&self, attribute_name: &str) -> bool {
-        self.attribute(attribute_name).is_some()
-    }
-
-    fn indexed_attributes(&self) -> HashSet<Attribute> {
-        HashSet::from_iter(vec![attr::ident])
-    }
-
-    fn attribute(&self, attribute_name: &str) -> Option<Attribute> {
-        self.datoms(Index::Avet.a(attr::ident).v(Value::Str(attribute_name.into())))
-            .unwrap()
-            .iter().next()
-            .map(|d| Attribute(d.entity))
-    }
-
-    fn attribute_name(&self, attribute: Attribute) -> Option<String> {
-        self.datoms(Index::Avet.e(attribute.0).a(attr::ident)).unwrap()
-            .into_iter()
-            .next()
-            .and_then(|d| match d.value {
-                Value::Str(ref s) => Some(s.clone()),
-                _ => None
-            })
-    }
-
-    fn attribute_info<A: ToAttribute>(&self, attribute: A) -> Result<AttributeInfo, Self::Error> {
-        let mut info = AttributeInfo {
-            cardinality_many: false
-        };
-
-        let attribute_eid = attribute.to_attribute(self).unwrap().0;
-        let attribute_datoms = self.datoms(Index::Eavt.e(attribute_eid))?;
-        for datom in attribute_datoms {
-            match datom.attribute {
-                attr::cardinality_many => {
-                    info.cardinality_many = datom.value != Value::Bool(false)
-                },
-                _ => ()
-            }
-        }
-
-        Ok(info)
-    }
-}
-
-
 #[allow(unused)]
 macro_rules! test_impls {
     ( $placeholder:ident, $fns:tt ) => {
-        test_impls!([// (test_db, ::tests::in_memory::TestDb::new())
-
-                     (sqlite,  ::SqliteDb::new().unwrap())],
+        test_impls!([(sqlite,  ::Db::new().unwrap())],
                     $placeholder,
                     $fns);
     };
@@ -405,34 +180,5 @@ macro_rules! test_impls {
 pub mod tests {
     mod db;
     mod data;
-    mod in_memory;
     mod usage;
-
-    /*
-    // TODO: Move to separate module
-    #[test]
-    fn test_db_equality() {
-        use ::*;
-
-        let mut db1 = in_memory::TestDb::new();
-        let mut db2 = ::SqliteDb::new().unwrap();
-
-        db1.store_datoms(&data::make_test_data()).unwrap();
-        db2.store_datoms(&data::make_test_data()).unwrap();
-
-        assert_eq!(db1.all_datoms(), db2.all_datoms(),
-                   "Equality of db1 and db2 for db.all_datoms()");
-
-        use ::tests::data::person_name;
-        for idx in [Index::Eavt.into(),
-                    Index::Eavt.e(EntityId(1)),
-                    Index::Eavt.e(EntityId(999)),
-                    Index::Eavt.a(person_name)].iter() {
-
-            assert_eq!(db1.datoms(idx.clone()).unwrap(),
-                       db2.datoms(idx.clone()).unwrap(),
-                       "Equality of db1 and db2 for the {:?} index", idx);
-        }
-    }
-     */
 }

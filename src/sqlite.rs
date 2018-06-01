@@ -14,16 +14,17 @@ pub enum Error {
 }
 
 #[derive(Debug)]
-pub struct SqliteDb {
+pub struct Db {
     conn: rusqlite::Connection,
 }
 
-// TODO: Implement dynamic `Db::indexed_attributes`
-impl SqliteDb {
+const INDEXED_ATTRIBUTES: &[Attribute] = &[attr::ident];
+
+impl Db {
     pub fn new() -> Result<Self, Error> {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
 
-        let mut db = SqliteDb { conn };
+        let mut db = Db { conn };
         db.initialize()?;
         Ok(db)
     }
@@ -31,7 +32,7 @@ impl SqliteDb {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let conn = rusqlite::Connection::open(path).unwrap();
 
-        let mut db = SqliteDb { conn };
+        let mut db = Db { conn };
         db.initialize()?;
         Ok(db)
     }
@@ -49,7 +50,7 @@ impl SqliteDb {
             self.store_datoms(&seed_datoms())?;
         }
 
-        for unique in self.indexed_attributes() {
+        for unique in INDEXED_ATTRIBUTES {
             self.conn.execute("insert or ignore into unique_attributes (e) values (?1)", &[&unique.0])?;
         }
 
@@ -71,11 +72,9 @@ impl SqliteDb {
     }
 }
 
-impl Db for SqliteDb {
-    type Error = Error;
-
+impl Db {
     #[cfg(test)]
-    fn all_datoms<'a>(&'a self) -> Datoms<'a> {
+    pub(crate) fn all_datoms<'a>(&'a self) -> Datoms<'a> {
         let mut added_query = self.conn.prepare(
             "select * from datoms
              where retracted_tx is null
@@ -89,12 +88,12 @@ impl Db for SqliteDb {
         ).unwrap();
 
         let added = added_query
-            .query_map(&[], SqliteDb::make_datom).unwrap()
+            .query_map(&[], Db::make_datom).unwrap()
             .flat_map(|x| x)
             .collect::<Vec<Datom>>();
 
         let retracted = retracted_query
-            .query_map(&[], SqliteDb::make_datom).unwrap()
+            .query_map(&[], Db::make_datom).unwrap()
             .flat_map(|x| x)
             .collect::<Vec<Datom>>();
 
@@ -124,7 +123,7 @@ impl Db for SqliteDb {
         datoms
     }
 
-    fn highest_eid(&self, partition: Partition) -> EntityId {
+    pub(crate) fn highest_eid(&self, partition: Partition) -> EntityId {
         let partition_mask = partition as i64;
         let mut stmt = self.conn.prepare_cached(
             "select coalesce(max(e), 0) from datoms
@@ -138,7 +137,7 @@ impl Db for SqliteDb {
         EntityId(std::cmp::max(n, partition as i64))
     }
 
-    fn datoms<I: Into<FilteredIndex>>(&self, index: I) -> Result<Datoms, Self::Error> {
+    pub fn datoms<I: Into<FilteredIndex>>(&self, index: I) -> Result<Datoms, Error> {
         let index = index.into();
         let (e, a, v, t) = index.eavt();
 
@@ -199,12 +198,12 @@ impl Db for SqliteDb {
             }
         })?
         .map(|r| r.map_err(|e| e.into()))
-        .collect::<Result<Vec<_>, _>>();
+            .collect::<Result<Vec<_>, _>>();
 
         datoms
     }
 
-    fn store_datoms(&mut self, datoms: &[Datom]) -> Result<(), Self::Error> {
+    pub(crate) fn store_datoms(&mut self, datoms: &[Datom]) -> Result<(), Error> {
         let tx = self.conn.transaction()?;
 
         {
@@ -265,6 +264,203 @@ impl Db for SqliteDb {
         tx.commit()?;
 
         Ok(())
+    }
+
+    pub fn entity(&self, entity: EntityId) -> Result<Entity, Error> {
+        let datoms = self.datoms(Index::Eavt.e(entity))?;
+        let mut attrs: BTreeMap<Attribute, BTreeSet<&Datom>> = BTreeMap::new();
+
+        for datoms in &datoms {
+            let entry = attrs.entry(datoms.attribute)
+                .or_insert_with(BTreeSet::new);
+
+            match datoms.status {
+                Status::Asserted => {
+                    entry.insert(&datoms);
+                },
+                Status::Retracted(_) if entry.contains(&datoms) => {
+                    entry.remove(&datoms);
+                },
+                Status::Retracted(_) => {
+                    panic!("Got retraction for non-existing value. Retraction: {:?}", datoms)
+                }
+            }
+        }
+
+        // Assert all datoms are of the same entity
+        assert!(attrs.values().flat_map(|x| x).all(|datoms| datoms.entity == entity));
+
+        let values = attrs.into_iter()
+            .map(|(a, ds)| {
+                let datoms: Vec<_> = ds.into_iter()
+                    .map(|datoms| datoms.value.clone())
+                    .collect();
+                (a, datoms)
+            }).collect::<BTreeMap<Attribute, Vec<Value>>>();
+
+        let entity = Entity {
+            db: self,
+            eid: entity,
+            values,
+        };
+
+        Ok(entity)
+    }
+}
+
+impl Db {
+    pub fn tempid(&mut self) -> TempId {
+        tempid()
+    }
+
+    pub fn transact<O: ToOperation, I: IntoIterator<Item=O>>(&mut self, tx: I) -> Result<TransactionData, Error> {
+        let tx_eid = EntityId(self.highest_eid(Partition::Tx).0 + 1);
+
+        let now = chrono::Utc::now();
+
+        let mut datoms = vec![Datom {
+            entity:    tx_eid,
+            attribute: attr::tx_instant,
+            value:     Value::DateTime(now),
+            tx:        tx_eid,
+            status:    Status::Asserted
+        }];
+
+        let tx = tx.into_iter()
+            .map(|op| op.to_operation(self))
+            .map(|op| op.map_err(|_| TransactionError::NonIdentAttributeTransacted))
+            .collect::<Result<Vec<Operation>, TransactionError>>()?;
+
+        datoms.reserve(tx.len());
+
+        let eids = {
+            let mut eids = BTreeMap::new();
+            let mut highest_eid = self.highest_eid(Partition::User).0;
+            let mut highest_db_eid = self.highest_eid(Partition::Db).0;
+
+            for operation in &tx {
+                if let Operation::TempidAssertion(tempid, attribute, _) = operation {
+                    eids.entry(*tempid)
+                        .or_insert_with(|| {
+                            // If we're asserting an internal attribute (db/id,
+                            // db/ident, db/doc, db.cardinality/many) we use the Db
+                            // partition
+                            if attribute.is_internal() {
+                                highest_db_eid += 1;
+                                EntityId(highest_db_eid)
+                            } else {
+                                highest_eid += 1;
+                                EntityId(highest_eid)
+                            }
+                        });
+                }
+            }
+            eids
+        };
+
+        for operation in tx {
+            let (e, a, v, status) = match operation {
+                Operation::Assertion(eid, a, v)       => (eid,        a, v, Status::Asserted),
+                Operation::Retraction(eid, a, v)      => (eid,        a, v, Status::Retracted(tx_eid)),
+                Operation::TempidAssertion(tid, a, v) => (eids[&tid], a, v, Status::Asserted)
+            };
+
+            if self.attribute_name(a).is_none() {
+                return Err(TransactionError::NonIdentAttributeTransacted.into())
+            }
+
+            // If the operation is an assertion we have to handle the following things:
+            //
+            // - If the datom isn't db.cardinality/many we have to generate a retraction for the previous value
+            //
+            // - If the attribute of this datom is `db/ident` we have to make sure it isn't changing the schema
+            //
+            if status == Status::Asserted {
+                if let Some(previous_datom) = self.datoms(Index::Eavt.e(e).a(a)).unwrap().iter().next() {
+                    // Prevent database schema changes
+                    if a == attr::ident && v != previous_datom.value {
+                        let old_attribute_name = previous_datom.value.as_string().unwrap();
+                        let new_attribute_name = v.as_string().unwrap();
+                        return Err(TransactionError::ChangingIdentAttribute(old_attribute_name, new_attribute_name).into())
+                    }
+
+                    // Handle db.cardinality/many
+                    let attribute_info = self.attribute_info(a)?;
+
+                    if !attribute_info.cardinality_many {
+                        let retraction = Datom {
+                            entity: e,
+                            attribute: a,
+                            value: previous_datom.value.clone(),
+                            tx: tx_eid,
+                            status: Status::Retracted(tx_eid)
+                        };
+
+                        datoms.push(retraction);
+                    }
+                }
+            }
+
+            let datom = Datom {
+                entity: e,
+                attribute: a,
+                value: v.clone(),
+
+                tx: tx_eid,
+                status
+            };
+
+            datoms.push(datom);
+        }
+
+        self.store_datoms(&datoms)?;
+
+        Ok(TransactionData {
+            tx_id: tx_eid,
+            tempid_mappings: eids,
+        })
+    }
+}
+
+impl Db {
+    pub fn has_attribute(&self, attribute_name: &str) -> bool {
+        self.attribute(attribute_name).is_some()
+    }
+
+    pub fn attribute(&self, attribute_name: &str) -> Option<Attribute> {
+        self.datoms(Index::Avet.a(attr::ident).v(Value::Str(attribute_name.into())))
+            .unwrap()
+            .iter().next()
+            .map(|d| Attribute(d.entity))
+    }
+
+    pub fn attribute_name(&self, attribute: Attribute) -> Option<String> {
+        self.datoms(Index::Avet.e(attribute.0).a(attr::ident)).unwrap()
+            .into_iter()
+            .next()
+            .and_then(|d| match d.value {
+                Value::Str(ref s) => Some(s.clone()),
+                _ => None
+            })
+    }
+
+    pub fn attribute_info<A: ToAttribute>(&self, attribute: A) -> Result<AttributeInfo, Error> {
+        let mut info = AttributeInfo {
+            cardinality_many: false
+        };
+
+        let attribute_eid = attribute.to_attribute(self).unwrap().0;
+        let attribute_datoms = self.datoms(Index::Eavt.e(attribute_eid))?;
+        for datom in attribute_datoms {
+            match datom.attribute {
+                attr::cardinality_many => {
+                    info.cardinality_many = datom.value != Value::Bool(false)
+                },
+                _ => ()
+            }
+        }
+
+        Ok(info)
     }
 }
 

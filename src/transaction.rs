@@ -41,12 +41,12 @@ impl fmt::Display for UnknownAttributeError {
 
 pub trait ToOperation {
     // TOOD: no_doc
-    fn to_operation<D: Db>(&self, db: &D) -> Result<Operation, UnknownAttributeError>;
+    fn to_operation(&self, db: &Db) -> Result<Operation, UnknownAttributeError>;
 }
 
 impl<'a, V, A> ToOperation for &'a (Assert, TempId, A, V)
     where V: Into<Value> + Clone, A: ToAttribute {
-    fn to_operation<D: Db>(&self, db: &D) -> Result<Operation, UnknownAttributeError> {
+    fn to_operation(&self, db: &Db) -> Result<Operation, UnknownAttributeError> {
         if let Some(a) = self.2.to_attribute(db) {
             Ok(Operation::TempidAssertion(self.1, a, self.3.clone().into()))
         } else {
@@ -57,7 +57,7 @@ impl<'a, V, A> ToOperation for &'a (Assert, TempId, A, V)
 
 impl<'a, V, A> ToOperation for &'a (Assert, EntityId, A, V)
     where V: Into<Value> + Clone, A: ToAttribute {
-    fn to_operation<D: Db>(&self, db: &D) -> Result<Operation, UnknownAttributeError> {
+    fn to_operation(&self, db: &Db) -> Result<Operation, UnknownAttributeError> {
         if let Some(a) = self.2.to_attribute(db) {
             Ok(Operation::Assertion(self.1, a, self.3.clone().into()))
         } else {
@@ -68,7 +68,7 @@ impl<'a, V, A> ToOperation for &'a (Assert, EntityId, A, V)
 
 impl<'a, V, A> ToOperation for &'a (Retract, EntityId, A, V)
     where V: Into<Value> + Clone, A: ToAttribute {
-    fn to_operation<D: Db>(&self, db: &D) -> Result<Operation, UnknownAttributeError> {
+    fn to_operation(&self, db: &Db) -> Result<Operation, UnknownAttributeError> {
         if let Some(a) = self.2.to_attribute(db) {
             Ok(Operation::Retraction(self.1, a, self.3.clone().into()))
         } else {
