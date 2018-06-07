@@ -13,8 +13,6 @@ pub struct TransactionData {
 // TODO: Use `String` to describe the attributes
 #[derive(Debug, Fail, PartialEq, Eq)]
 pub enum TransactionError {
-    #[fail(display = "Tried to transact fact for attribute without db/ident")]
-    NonIdentAttributeTransacted,
     #[fail(display = "Tried to transact new value ({}) for existing db/ident attribute {}", _0, _1)]
     ChangingIdentAttribute(String, String),
     #[fail(display = "Tried to transact unknown attribute {}", _0)]
@@ -51,28 +49,23 @@ impl fmt::Display for UnknownAttributeError {
     }
 }
 
-pub trait ToOperation {
-    // TOOD: no_doc
-    fn to_operation(self, db: &Db) -> Result<Operation, UnknownAttributeError>;
-}
-
-impl<'a, A, V> ToOperation for &'a (Assert, TempId, A, V)
+impl<'a, A, V> From<&'a (Assert, TempId, A, V)> for Operation
     where A: Into<AttributeName> + Clone, V: Into<Value> + Clone {
-    fn to_operation(self, _db: &Db) -> Result<Operation, UnknownAttributeError> {
-        Ok(Operation::TempidAssertion(self.1, self.2.clone().into(), self.3.clone().into()))
+    fn from(o: &'a (Assert, TempId, A, V)) -> Operation {
+        Operation::TempidAssertion(o.1, o.2.clone().into(), o.3.clone().into())
     }
 }
 
-impl<'a, A, V> ToOperation for &'a (Assert, EntityId, A, V)
+impl<'a, A, V> From<&'a (Assert, EntityId, A, V)> for Operation
     where A: Into<AttributeName> + Clone, V: Into<Value> + Clone {
-    fn to_operation(self, _db: &Db) -> Result<Operation, UnknownAttributeError> {
-        Ok(Operation::Assertion(self.1, self.2.clone().into(), self.3.clone().into()))
+    fn from(o: &'a (Assert, EntityId, A, V)) -> Operation {
+        Operation::Assertion(o.1, o.2.clone().into(), o.3.clone().into())
     }
 }
 
-impl<'a, A, V> ToOperation for &'a (Retract, EntityId, A, V)
+impl<'a, A, V> From<&'a (Retract, EntityId, A, V)> for Operation
     where A: Into<AttributeName> + Clone,  V: Into<Value> + Clone {
-    fn to_operation(self, _db: &Db) -> Result<Operation, UnknownAttributeError> {
-        Ok(Operation::Retraction(self.1, self.2.clone().into(), self.3.clone().into()))
+    fn from(o: &'a (Retract, EntityId, A, V)) -> Operation {
+        Operation::Retraction(o.1, o.2.clone().into(), o.3.clone().into())
     }
 }

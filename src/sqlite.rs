@@ -314,7 +314,7 @@ impl Db {
         tempid()
     }
 
-    pub fn transact<O: ToOperation, I: IntoIterator<Item=O>>(&mut self, tx: I) -> Result<TransactionData, Error> {
+    pub fn transact<O: Into<Operation>, I: IntoIterator<Item=O>>(&mut self, tx: I) -> Result<TransactionData, Error> {
         let tx_eid = EntityId(self.highest_eid(Partition::Tx).0 + 1);
 
         let now = chrono::Utc::now();
@@ -328,9 +328,8 @@ impl Db {
         }];
 
         let tx = tx.into_iter()
-            .map(|op| op.to_operation(self))
-            .map(|op| op.map_err(|_| TransactionError::NonIdentAttributeTransacted))
-            .collect::<Result<Vec<Operation>, TransactionError>>()?;
+            .map(|op| op.into())
+            .collect::<Vec<Operation>>();
 
         datoms.reserve(tx.len());
 

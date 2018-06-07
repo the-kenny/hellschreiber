@@ -12,7 +12,7 @@ mod index;
 pub use index::*;
 
 mod transaction;
-pub use transaction::{Assert, Retract, Operation, ToOperation, TransactionError, TransactionData};
+pub use transaction::{Assert, Retract, Operation, TransactionError, TransactionData};
 
 mod entity;
 pub use entity::Entity;
