@@ -1,7 +1,7 @@
 use super::{Db, EntityId, Entity};
 use chrono;
 
-#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Serialize, Deserialize, From)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash, Serialize, Deserialize, From)]
 pub enum Value {
     Bool(bool),
     Str(String),

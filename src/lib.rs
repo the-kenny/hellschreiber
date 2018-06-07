@@ -33,7 +33,7 @@ pub type TxId = EntityId;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
 pub struct Attribute(EntityId);
-type AttributeName = String;
+pub type AttributeName = String;
 
 impl Attribute {
     fn is_internal(&self) -> bool {
@@ -46,14 +46,16 @@ impl Attribute {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
 pub enum Status {
     Asserted,
     Retracted(EntityId)
 }
 
 impl Status {
-    fn is_assertion(&self) -> bool { *self == Status::Asserted }
+    fn is_assertion(&self) -> bool {
+        *self == Status::Asserted
+    }
 
     fn is_retraction(&self) -> bool {
         match self {
@@ -63,7 +65,7 @@ impl Status {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
 pub struct Datom {
     pub entity:    EntityId,
     pub attribute: Attribute,

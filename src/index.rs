@@ -35,10 +35,6 @@ impl FilteredIndex {
     pub fn v(mut self, v: Value)     -> Self { self.v = Some(v); self }
     pub fn t(mut self, t: TxId)      -> Self { self.t = Some(t); self }
 
-    pub(crate) fn eavt(&self) -> (Option<EntityId>, Option<Attribute>, Option<Value>, Option<TxId>) {
-        (self.e, self.a, self.v.clone(), self.t)
-    }
-
     pub fn matches(&self, datom: &Datom) -> bool {
         let e = self.e;
         let a = self.a;

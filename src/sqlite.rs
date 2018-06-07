@@ -102,13 +102,12 @@ impl Db {
 
         // For each retracted datom create two new datoms in our final
         // data set. One assertion and one retraction.
-        for d in retracted {
-            assert!(d.status.is_retraction());
+        for mut retracted in retracted.into_iter() {
+            assert!(retracted.status.is_retraction());
 
-            let mut added = d.clone();
+            let mut added = retracted.clone();
             added.status = Status::Asserted;
 
-            let mut retracted = d.clone();
             retracted.tx = match retracted.status {
                 Status::Retracted(tx) => tx,
                 _ => unreachable!()
@@ -140,7 +139,6 @@ impl Db {
 
     pub fn datoms<I: Into<FilteredIndex>>(&self, index: I) -> Result<Datoms, Error> {
         let index = index.into();
-        let (e, a, v, t) = index.eavt();
 
         let order_statement = match index.index {
             Index::Eavt => "order by datoms.e, datoms.a, datoms.v, datoms.t asc",
@@ -165,23 +163,23 @@ impl Db {
              {}
       ", join_clause, order_statement))?;
 
-        let entity_query_input = match e {
+        let entity_query_input = match index.e {
             Some(EntityId(id)) => rusqlite::types::Value::Integer(id),
             None              => rusqlite::types::Value::Null,
         };
 
-        let attribute_query_input = match a {
+        let attribute_query_input = match index.a {
             Some(Attribute(EntityId(id))) => rusqlite::types::Value::Integer(id),
             None              => rusqlite::types::Value::Null,
         };
 
         use rusqlite::types::{ToSql,ToSqlOutput};
-        let value_query_input = match v {
+        let value_query_input = match index.v {
             Some(ref value) => value.to_sql().expect("Failed to convert to SQL type"),
             None        => ToSqlOutput::Owned(rusqlite::types::Value::Null),
         };
 
-        let tx_query_input = match t {
+        let tx_query_input = match index.t {
             Some(EntityId(id)) => rusqlite::types::Value::Integer(id),
             None              => rusqlite::types::Value::Null,
         };
@@ -443,7 +441,7 @@ impl Db {
     }
 
     pub fn attribute(&self, attribute_name: &str) -> Option<Attribute> {
-        self.datoms(Index::Avet.a(attr::ident).v(Value::Str(attribute_name.into())))
+        self.datoms(Index::Avet.a(attr::ident).v(attribute_name.into()))
             .unwrap()
             .iter().next()
             .map(|d| Attribute(d.entity))
@@ -454,7 +452,7 @@ impl Db {
             .into_iter()
             .next()
             .and_then(|d| match d.value {
-                Value::Str(ref s) => Some(s.clone()),
+                Value::Str(s) => Some(s),
                 _ => None
             })
     }
