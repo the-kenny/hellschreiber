@@ -4,6 +4,7 @@ extern crate serde_json;
 use super::*;
 
 use std::path::Path;
+use std::collections::{HashSet, HashMap};
 
 #[derive(Debug, Fail, From)]
 pub enum Error {
@@ -333,13 +334,30 @@ impl Db {
 
         datoms.reserve(tx.len());
 
+        let attribute_ids = {
+            let deduped_attribute_names = tx.iter()
+            .map(Operation::attribute_name)
+                .collect::<HashSet<_>>();
+
+            deduped_attribute_names.into_iter()
+                .map(|attribute_name| {
+                    if let Some(attribute) = self.attribute(&attribute_name) {
+                        Ok((attribute_name.into(), attribute))
+                    } else {
+                        Err(TransactionError::UnknownAttribute(attribute_name.to_string()))
+                    }
+                })
+                .collect::<Result<HashMap<AttributeName, Attribute>, _>>()?
+        };
+        
         let eids = {
             let mut eids = BTreeMap::new();
             let mut highest_eid = self.highest_eid(Partition::User).0;
             let mut highest_db_eid = self.highest_eid(Partition::Db).0;
 
             for operation in &tx {
-                if let Operation::TempidAssertion(tempid, attribute, _) = operation {
+                if let Operation::TempidAssertion(tempid, attribute_name, _) = operation {
+                    let attribute = attribute_ids[attribute_name];
                     eids.entry(*tempid)
                         .or_insert_with(|| {
                             // If we're asserting an internal attribute (db/id,
@@ -365,9 +383,7 @@ impl Db {
                 Operation::TempidAssertion(tid, a, v) => (eids[&tid], a, v, Status::Asserted)
             };
 
-            if self.attribute_name(a).is_none() {
-                return Err(TransactionError::NonIdentAttributeTransacted.into())
-            }
+            let attribute = attribute_ids[&a];
 
             // If the operation is an assertion we have to handle the following things:
             //
@@ -376,9 +392,9 @@ impl Db {
             // - If the attribute of this datom is `db/ident` we have to make sure it isn't changing the schema
             //
             if status == Status::Asserted {
-                if let Some(previous_datom) = self.datoms(Index::Eavt.e(e).a(a)).unwrap().iter().next() {
+                if let Some(previous_datom) = self.datoms(Index::Eavt.e(e).a(attribute)).unwrap().iter().next() {
                     // Prevent database schema changes
-                    if a == attr::ident && v != previous_datom.value {
+                    if attribute == attr::ident && v != previous_datom.value {
                         let old_attribute_name = previous_datom.value.as_string().unwrap();
                         let new_attribute_name = v.as_string().unwrap();
                         return Err(TransactionError::ChangingIdentAttribute(old_attribute_name, new_attribute_name).into())
@@ -390,7 +406,7 @@ impl Db {
                     if !attribute_info.cardinality_many {
                         let retraction = Datom {
                             entity: e,
-                            attribute: a,
+                            attribute: attribute,
                             value: previous_datom.value.clone(),
                             tx: tx_eid,
                             status: Status::Retracted(tx_eid)
@@ -403,7 +419,7 @@ impl Db {
 
             let datom = Datom {
                 entity: e,
-                attribute: a,
+                attribute: attribute,
                 value: v.clone(),
 
                 tx: tx_eid,
@@ -444,12 +460,12 @@ impl Db {
             })
     }
 
-    pub fn attribute_info<A: ToAttribute>(&self, attribute: A) -> Result<AttributeInfo, Error> {
+    pub fn attribute_info(&self, attribute: AttributeName) -> Result<AttributeInfo, Error> {
         let mut info = AttributeInfo {
             cardinality_many: false
         };
 
-        let attribute_eid = attribute.to_attribute(self).unwrap().0;
+        let attribute_eid = self.attribute(&attribute).unwrap().0;
         let attribute_datoms = self.datoms(Index::Eavt.e(attribute_eid))?;
         for datom in attribute_datoms {
             match datom.attribute {

@@ -183,8 +183,8 @@ test_impls!(db, {
     fn test_fn_attribute() {
         let mut db = db!();
         // TODO: Use `str` as db/ident
-        let schema = &[(Assert, TempId(42), attr::ident, Value::Str("person_name".into())),
-                       (Assert, TempId(42), attr::doc, Value::Str("The name of a person".into()))];
+        let schema = &[(Assert, TempId(42), "db/ident", Value::Str("person_name".into())),
+                       (Assert, TempId(42), "db/doc", Value::Str("The name of a person".into()))];
         db.transact(schema).unwrap();
         assert!(db.attribute("person_name").is_some());
     }
@@ -192,8 +192,8 @@ test_impls!(db, {
     #[test]
     fn test_db_metadata() {
         let db = db!();
-        let Attribute(ident_eid) = "db/ident".to_attribute(&db).unwrap();
-        let Attribute(doc_eid) = "db/doc".to_attribute(&db).unwrap();
+        let Attribute(ident_eid) = db.attribute("db/ident").unwrap();
+        let Attribute(doc_eid) = db.attribute("db/doc").unwrap();
 
         assert!(!db.entity(ident_eid).unwrap().values.is_empty());
         assert!(!db.entity(doc_eid).unwrap().values.is_empty());
@@ -333,7 +333,7 @@ test_impls!(db, {
         let error = db.transact(tx).unwrap_err();
 
         match error {
-            Error::TransactionError(TransactionError::NonIdentAttributeTransacted) => (),
+            Error::TransactionError(TransactionError::UnknownAttribute(_)) => (),
             _ => panic!("")
         }
     }

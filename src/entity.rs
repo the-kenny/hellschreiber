@@ -1,4 +1,4 @@
-use super::{Db, EntityId, Attribute, Value, ToAttribute};
+use super::{Db, EntityId, Attribute, Value};
 
 use std::{fmt, ops};
 use std::collections::BTreeMap;
@@ -15,18 +15,18 @@ pub struct Entity<'a> {
 pub struct NoRefError;
 
 impl<'a> Entity<'a> {
-    pub fn get<A: ToAttribute>(&'a self, attribute: A) -> Option<&'a Value> {
+    pub fn get(&'a self, attribute: &str) -> Option<&'a Value> {
         self.get_many(attribute).iter().next()
     }
 
-    pub fn get_many<A: ToAttribute>(&'a self, attribute: A) -> &'a[Value] {
-        attribute.to_attribute(self.db)
+    pub fn get_many(&'a self, attribute: &str) -> &'a[Value] {
+        self.db.attribute(&attribute)
             .and_then(|attribute| self.values.get(&attribute))
             .map(|x| &x[..])
             .unwrap_or_else(|| &EMPTY_VEC[..])
     }
 
-    pub fn follow_ref<A: ToAttribute>(&'a self, ref_attribute: A) -> Result<Entity<'a>, NoRefError> {
+    pub fn follow_ref(&'a self, ref_attribute: &'a str) -> Result<Entity<'a>, NoRefError> {
         match self[ref_attribute] {
             Value::Ref(eid) => Ok(self.db.entity(eid).unwrap()),
             _ => Err(NoRefError)
@@ -66,9 +66,9 @@ impl<'a, D: Db> ops::Index<&'a str> for &'a Entity<'a, D> {
 }
 */
 
-impl<'a, A: ToAttribute> ops::Index<A> for Entity<'a> {
+impl<'a> ops::Index<&'a str> for Entity<'a> {
     type Output = Value;
-    fn index(&self, attribute: A) -> &Self::Output {
+    fn index(&self, attribute: &'a str) -> &Self::Output {
         self.get(attribute).unwrap()
     }
 }

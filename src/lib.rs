@@ -33,6 +33,7 @@ pub type TxId = EntityId;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
 pub struct Attribute(EntityId);
+type AttributeName = String;
 
 impl Attribute {
     fn is_internal(&self) -> bool {
@@ -44,23 +45,6 @@ impl Attribute {
             || x == attr::cardinality_many
     }
 }
-
-pub trait ToAttribute {
-    fn to_attribute(&self, db: &Db) -> Option<Attribute>;
-}
-
-impl ToAttribute for Attribute {
-    fn to_attribute(&self, _db: &Db) -> Option<Attribute> {
-        Some(*self)
-    }
-}
-
-impl<'a> ToAttribute for &'a str {
-    fn to_attribute(&self, db: &Db) -> Option<Attribute> {
-        db.attribute(self)
-    }
-}
-
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub enum Status {

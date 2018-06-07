@@ -17,14 +17,26 @@ pub enum TransactionError {
     NonIdentAttributeTransacted,
     #[fail(display = "Tried to transact new value ({}) for existing db/ident attribute {}", _0, _1)]
     ChangingIdentAttribute(String, String),
+    #[fail(display = "Tried to transact unknown attribute {}", _0)]
+    UnknownAttribute(String),
     // TODO: Error for setting db.cardinality/many on db/ident
 }
 
 #[derive(Debug)]
 pub enum Operation {
-    Assertion(EntityId, Attribute, Value),
-    Retraction(EntityId, Attribute, Value),
-    TempidAssertion(TempId, Attribute, Value)
+    Assertion(EntityId, AttributeName, Value),
+    Retraction(EntityId, AttributeName, Value),
+    TempidAssertion(TempId, AttributeName, Value)
+}
+
+impl Operation {
+    pub(crate) fn attribute_name(&self) -> &str {
+        match self {
+            Operation::Assertion(_, a, _) => a,
+            Operation::Retraction(_, a, _) => a,
+            Operation::TempidAssertion(_, a, _) => a
+        }
+    }
 }
 
 pub struct Assert;
@@ -41,38 +53,26 @@ impl fmt::Display for UnknownAttributeError {
 
 pub trait ToOperation {
     // TOOD: no_doc
-    fn to_operation(&self, db: &Db) -> Result<Operation, UnknownAttributeError>;
+    fn to_operation(self, db: &Db) -> Result<Operation, UnknownAttributeError>;
 }
 
-impl<'a, V, A> ToOperation for &'a (Assert, TempId, A, V)
-    where V: Into<Value> + Clone, A: ToAttribute {
-    fn to_operation(&self, db: &Db) -> Result<Operation, UnknownAttributeError> {
-        if let Some(a) = self.2.to_attribute(db) {
-            Ok(Operation::TempidAssertion(self.1, a, self.3.clone().into()))
-        } else {
-            Err(UnknownAttributeError)
-        }
+impl<'a, A, V> ToOperation for &'a (Assert, TempId, A, V)
+    where A: Into<AttributeName> + Clone, V: Into<Value> + Clone {
+    fn to_operation(self, _db: &Db) -> Result<Operation, UnknownAttributeError> {
+        Ok(Operation::TempidAssertion(self.1, self.2.clone().into(), self.3.clone().into()))
     }
 }
 
-impl<'a, V, A> ToOperation for &'a (Assert, EntityId, A, V)
-    where V: Into<Value> + Clone, A: ToAttribute {
-    fn to_operation(&self, db: &Db) -> Result<Operation, UnknownAttributeError> {
-        if let Some(a) = self.2.to_attribute(db) {
-            Ok(Operation::Assertion(self.1, a, self.3.clone().into()))
-        } else {
-            Err(UnknownAttributeError)
-        }
+impl<'a, A, V> ToOperation for &'a (Assert, EntityId, A, V)
+    where A: Into<AttributeName> + Clone, V: Into<Value> + Clone {
+    fn to_operation(self, _db: &Db) -> Result<Operation, UnknownAttributeError> {
+        Ok(Operation::Assertion(self.1, self.2.clone().into(), self.3.clone().into()))
     }
 }
 
-impl<'a, V, A> ToOperation for &'a (Retract, EntityId, A, V)
-    where V: Into<Value> + Clone, A: ToAttribute {
-    fn to_operation(&self, db: &Db) -> Result<Operation, UnknownAttributeError> {
-        if let Some(a) = self.2.to_attribute(db) {
-            Ok(Operation::Retraction(self.1, a, self.3.clone().into()))
-        } else {
-            Err(UnknownAttributeError)
-        }
+impl<'a, A, V> ToOperation for &'a (Retract, EntityId, A, V)
+    where A: Into<AttributeName> + Clone,  V: Into<Value> + Clone {
+    fn to_operation(self, _db: &Db) -> Result<Operation, UnknownAttributeError> {
+        Ok(Operation::Retraction(self.1, self.2.clone().into(), self.3.clone().into()))
     }
 }
