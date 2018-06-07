@@ -9,6 +9,7 @@ pub enum Index {
 
 impl Index {
     pub fn e(self, e: EntityId)  -> FilteredIndex { FilteredIndex::new(self).e(e) }
+    // TODO: Allow passing `AttributeName`
     pub fn a(self, a: Attribute) -> FilteredIndex { FilteredIndex::new(self).a(a) }
     pub fn v(self, v: Value)     -> FilteredIndex { FilteredIndex::new(self).v(v) }
     pub fn t(self, t: TxId)      -> FilteredIndex { FilteredIndex::new(self).t(t) }

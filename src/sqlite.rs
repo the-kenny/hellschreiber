@@ -449,7 +449,7 @@ impl Db {
             .map(|d| Attribute(d.entity))
     }
 
-    pub fn attribute_name(&self, attribute: Attribute) -> Option<String> {
+    pub fn attribute_name(&self, attribute: Attribute) -> Option<AttributeName> {
         self.datoms(Index::Avet.e(attribute.0).a(attr::ident)).unwrap()
             .into_iter()
             .next()
