@@ -457,18 +457,20 @@ impl Db {
             })
     }
 
-    pub fn attribute_info(&self, attribute: AttributeName) -> Result<AttributeInfo, Error> {
+    pub fn attribute_info<A: AsRef<str>>(&self, attribute: A) -> Result<AttributeInfo, Error> {
         let mut info = AttributeInfo {
-            cardinality_many: false
+            cardinality_many: false,
+            doc: None,
         };
 
-        let attribute_eid = self.attribute(&attribute).unwrap().0;
+        let attribute_eid = self.attribute(attribute.as_ref()).unwrap().0;
         let attribute_datoms = self.datoms(Index::Eavt.e(attribute_eid))?;
         for datom in attribute_datoms {
-            match datom.attribute {
-                attr::cardinality_many => {
-                    info.cardinality_many = datom.value != Value::Bool(false)
-                },
+            match (datom.attribute, &datom.value) {
+                // TODO: Handle both matches fo cardinality/many
+                (attr::cardinality_many, _) => info.cardinality_many = datom.value != Value::Bool(false),
+                (attr::doc, Value::Str(s))  => info.doc = Some(s.to_string()),
+                (attr::doc, value)          => panic!("Invalid value {:?} for db/doc attribute of attribute {}", value, attribute.as_ref()),
                 _ => ()
             }
         }

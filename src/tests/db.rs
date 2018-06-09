@@ -352,4 +352,34 @@ test_impls!(db, {
             db.transact(&[(Assert, entity, "foo/bar", "ASDF")]).unwrap();
         }
     }
+
+    #[test]
+    fn test_attribute_info_cardinality_many() {
+                let mut db = db!();
+        let attr_tid = db.tempid();
+        db.transact(&[(Assert, tempid(), "db/ident", Value::Str("cardinality/one".into())),
+                      (Assert, attr_tid, "db/ident", Value::Str("cardinality/many".into())),
+                      (Assert, attr_tid, "db.cardinality/many", Value::Bool(true))]).unwrap();
+        assert_eq!(false, db.attribute_info("cardinality/one").unwrap().cardinality_many);
+        assert_eq!(true, db.attribute_info("cardinality/many").unwrap().cardinality_many);
+    }
+
+    #[test]
+    fn test_attribute_info_doc() {
+        let mut db = db!();
+        let attr_tid = db.tempid();
+        db.transact(&[(Assert, attr_tid, "db/ident", Value::Str("foo/bar".into())),
+                      (Assert, attr_tid, "db/doc", Value::Str("Foobar".into()))]).unwrap();
+        assert_eq!(Some("Foobar".into()), db.attribute_info("foo/bar").unwrap().doc);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_attribute_info_doc_invalid_value() {
+        let mut db = db!();
+        let attr_tid = db.tempid();
+        db.transact(&[(Assert, attr_tid, "db/ident", Value::Str("foo/bar".into())),
+                      (Assert, attr_tid, "db/doc", Value::Int(42))]).unwrap();
+        db.attribute_info("foo/bar").unwrap();
+    }    
 });

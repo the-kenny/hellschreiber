@@ -134,7 +134,9 @@ impl Partition {
 
 #[derive(Debug)]
 pub struct AttributeInfo {
+    // pub entity: EntityId,
     pub cardinality_many: bool,
+    pub doc: Option<String>
 }
 
 #[allow(unused)]
