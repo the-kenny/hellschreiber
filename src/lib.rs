@@ -139,31 +139,6 @@ pub struct AttributeInfo {
     pub doc: Option<String>
 }
 
-#[allow(unused)]
-macro_rules! test_impls {
-    ( $placeholder:ident, $fns:tt ) => {
-        test_impls!([(sqlite,  ::Db::new().unwrap())],
-                    $placeholder,
-                    $fns);
-    };
-
-    ([ $( ($mod:ident, $db:expr) ),* ], $placeholder:ident, $fns:tt) => {
-        $(
-            mod $mod {
-                test_impls!($db, $placeholder, $fns);
-            }
-        )*
-    };
-
-    ( $db:expr, $placeholder:ident, { $( $fns:item )* }) => {
-        $(
-            #[allow(unused)]
-            macro_rules! $placeholder { () => { $db } }
-            $fns
-        )*
-    };
-}
-
 #[cfg(test)]
 pub mod tests {
     mod db;
